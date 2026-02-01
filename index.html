@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Asset Box - Asset Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                green: '#00C805', // Robinhood Neon Green
+                red: '#FF5000',   // Robinhood Red
+                dark: '#0e0e0f',  // Deep background
+                card: '#1e2124',  // Card background
+                hover: '#2a2d31', // Hover state
+                text: '#ffffff',
+                muted: '#8e9196'
+              }
+            },
+            fontFamily: {
+              sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+              mono: ['SF Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace'],
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #0e0e0f;
+        color: #ffffff;
+      }
+      /* Scrollbar styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0e0e0f;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #2a2d31;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #3e4145;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react/": "https://esm.sh/react@18.3.1/",
+    "react-dom": "https://esm.sh/react-dom@18.3.1",
+    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
+    "recharts": "https://esm.sh/recharts@2.12.7?external=react,react-dom",
+    "lucide-react": "https://esm.sh/lucide-react@0.358.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
