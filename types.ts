@@ -48,7 +48,6 @@ export interface Asset {
   // For Lent Money
   debtorName?: string; // Explicit field, though we can map to name
   dateLent?: string;
-  expectedReturnDate?: string;
 
   // For API Assets
   symbol?: string; // e.g., AAPL, BTC, 00700
