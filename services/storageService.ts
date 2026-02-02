@@ -61,9 +61,14 @@ export const saveRemoteState = async (userId: string, state: AppState) => {
 
   try {
     const docRef = doc(db, "users", userId);
+    
+    // FIX: Firebase Firestore does not support 'undefined' values.
+    // JSON.stringify removes keys with undefined values, sanitizing the object for Firestore.
+    const sanitizedState = JSON.parse(JSON.stringify(state));
+
     // We store it under an 'appState' field
     await setDoc(docRef, { 
-      appState: state,
+      appState: sanitizedState,
       lastUpdated: new Date().toISOString()
     }, { merge: true });
   } catch (error) {

@@ -65,7 +65,6 @@ const Portfolio: React.FC<PortfolioProps> = ({
   // New Fields for Lent Money
   const [formDebtor, setFormDebtor] = useState('');
   const [formDateLent, setFormDateLent] = useState('');
-  const [formReturnDate, setFormReturnDate] = useState('');
 
   // Fields for Liquidation
   const [formExitPrice, setFormExitPrice] = useState('');
@@ -78,12 +77,11 @@ const Portfolio: React.FC<PortfolioProps> = ({
     setFormQuantity('');
     setFormCost('');
     setFormValue('');
-    setFormCurrency(Currency.USD);
+    setFormCurrency(Currency.CNY); // Default to CNY for manual assets
     setFormDueDate('');
     setFormMonthlyInterest('');
     setFormDebtor('');
     setFormDateLent('');
-    setFormReturnDate('');
     setFormExitPrice('');
     setFormExitDate(new Date().toISOString().split('T')[0]);
     setFormExitReason('');
@@ -174,11 +172,12 @@ const Portfolio: React.FC<PortfolioProps> = ({
           setFormDebtor(asset.debtorName || asset.name);
           setFormValue(asset.manualValue?.toString() || '');
           setFormDateLent(asset.dateLent || '');
-          setFormReturnDate(asset.expectedReturnDate || '');
+          setFormCurrency(asset.currency || Currency.CNY);
       } else {
           setModalType('MANUAL');
           setFormName(asset.name);
           setFormValue(asset.manualValue?.toString() || '');
+          setFormCurrency(asset.currency || Currency.CNY);
       }
       setShowAddModal(true);
   };
@@ -202,12 +201,14 @@ const Portfolio: React.FC<PortfolioProps> = ({
   const openAddManual = () => {
     setModalType('MANUAL');
     setEditingAssetId(null);
+    setFormCurrency(Currency.CNY); // Default CNY
     setShowAddModal(true);
   }
 
   const openAddLent = () => {
     setModalType('LENT');
     setEditingAssetId(null);
+    setFormCurrency(Currency.CNY);
     setShowAddModal(true);
   }
 
@@ -304,7 +305,7 @@ const Portfolio: React.FC<PortfolioProps> = ({
             id: editingAssetId || Date.now().toString(),
             name: formName,
             type: AssetType.CASH,
-            currency: Currency.USD,
+            currency: formCurrency,
             manualValue: parseFloat(formValue) || 0,
         };
         if (editingAssetId) {
@@ -320,10 +321,9 @@ const Portfolio: React.FC<PortfolioProps> = ({
             name: formDebtor, // Store debtor name in name field for simplicity
             debtorName: formDebtor,
             type: AssetType.LENT_MONEY,
-            currency: Currency.CNY, // Assuming Lent money is same as base for now, or could add selector
+            currency: Currency.CNY, // Keeping Lent as CNY default for now as per minimal change for Lent
             manualValue: parseFloat(formValue) || 0,
             dateLent: formDateLent,
-            expectedReturnDate: formReturnDate
         };
         if (editingAssetId) {
              const existing = state.assets.find(a => a.id === editingAssetId);
@@ -641,7 +641,7 @@ const Portfolio: React.FC<PortfolioProps> = ({
                      {activeTab === 'crypto' && <th className="p-4 text-right">Quantity</th>}
                      {activeTab === 'crypto' && <th className="p-4 text-right">Price</th>}
                      {activeTab === 'liabilities' && <th className="p-4 text-right">Details</th>}
-                     {activeTab === 'lent' && <th className="p-4 text-right">Dates</th>}
+                     {activeTab === 'lent' && <th className="p-4 text-right">Date Lent</th>}
                      <th className="p-4 text-right">Total Value (Base)</th>
                      <th className="p-4 text-right pr-6">Action</th>
                   </tr>
@@ -686,12 +686,11 @@ const Portfolio: React.FC<PortfolioProps> = ({
                            </td>}
                            {activeTab === 'lent' && (
                                <td className="p-4 text-right text-xs text-brand-muted">
-                                   <div>Lent: {a.dateLent || '-'}</div>
-                                   <div>Exp: {a.expectedReturnDate || '-'}</div>
+                                   <div>{a.dateLent || '-'}</div>
                                </td>
                            )}
                            <td className="p-4 text-right font-mono text-white">
-                              <div>¥{(a.currentValue || a.manualValue || 0).toLocaleString()}</div>
+                              <div>{getCurrencySymbol(state.baseCurrency)}{(a.currentValue || a.manualValue || 0).toLocaleString()}</div>
                               {activeTab === 'crypto' && a.totalReturnPct !== undefined && (
                                   <div className={`text-xs ${a.totalReturnPct >= 0 ? 'text-brand-green' : 'text-brand-red'}`}>
                                     {a.totalReturnPct >= 0 ? '+' : ''}{a.totalReturnPct.toFixed(2)}%
@@ -830,15 +829,9 @@ const Portfolio: React.FC<PortfolioProps> = ({
                            <label className="block text-xs text-brand-muted mb-1">Amount</label>
                            <input required type="number" step="any" value={formValue} onChange={e => setFormValue(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" placeholder="0.00" />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                               <label className="block text-xs text-brand-muted mb-1">Date Lent</label>
-                               <input type="date" value={formDateLent} onChange={e => setFormDateLent(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
-                            </div>
-                            <div>
-                               <label className="block text-xs text-brand-muted mb-1">Expected Return</label>
-                               <input type="date" value={formReturnDate} onChange={e => setFormReturnDate(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
-                            </div>
+                        <div>
+                            <label className="block text-xs text-brand-muted mb-1">Date Lent</label>
+                            <input type="month" value={formDateLent} onChange={e => setFormDateLent(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
                         </div>
                       </>
                   )}
@@ -849,9 +842,19 @@ const Portfolio: React.FC<PortfolioProps> = ({
                            <label className="block text-xs text-brand-muted mb-1">Name</label>
                            <input required value={formName} onChange={e => setFormName(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
                         </div>
-                        <div>
-                           <label className="block text-xs text-brand-muted mb-1">Value/Amount</label>
-                           <input required type="number" step="any" value={formValue} onChange={e => setFormValue(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" placeholder="0.00" />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs text-brand-muted mb-1">Currency</label>
+                                <select value={formCurrency} onChange={e => setFormCurrency(e.target.value as Currency)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white outline-none">
+                                    <option value={Currency.CNY}>CNY (Chinese Yuan)</option>
+                                    <option value={Currency.USD}>USD (US Dollar)</option>
+                                    <option value={Currency.HKD}>HKD (Hong Kong Dollar)</option>
+                                </select>
+                            </div>
+                            <div>
+                               <label className="block text-xs text-brand-muted mb-1">Value/Amount</label>
+                               <input required type="number" step="any" value={formValue} onChange={e => setFormValue(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" placeholder="0.00" />
+                            </div>
                         </div>
                       </>
                   )}
