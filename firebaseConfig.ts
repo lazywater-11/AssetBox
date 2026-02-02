@@ -4,13 +4,14 @@ import { getFirestore } from 'firebase/firestore';
 
 // TODO: Replace with your actual Firebase project config
 // You get this from Firebase Console -> Project Settings -> General -> Your Apps
+// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyCLtNLQkKSr8E_vFg_Qgh3kv12hNeayWIc",
-  authDomain: "gen-lang-client-0700094950.firebaseapp.com",
-  projectId: "gen-lang-client-0700094950",
-  storageBucket: "gen-lang-client-0700094950.firebasestorage.app",
-  messagingSenderId: "167004705569",
-  appId: "1:167004705569:web:0f5d3320654f19e2646460"
+  apiKey: "AIzaSyDXY-wtJiNbtcwgOfrOuRg5Qjl5ghI9wns",
+  authDomain: "gen-lang-client-0395415742.firebaseapp.com",
+  projectId: "gen-lang-client-0395415742",
+  storageBucket: "gen-lang-client-0395415742.firebasestorage.app",
+  messagingSenderId: "881474053856",
+  appId: "1:881474053856:web:e4e3fba691665387171285"
 };
 
 const app = initializeApp(firebaseConfig);
