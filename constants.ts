@@ -1,4 +1,4 @@
-import { LayoutDashboard, PieChart, Wallet, BookOpen, Settings, TrendingUp, TrendingDown, DollarSign, Bitcoin, Landmark, CreditCard } from 'lucide-react';
+import { LayoutDashboard, PieChart, Wallet, BookOpen, Settings, TrendingUp, TrendingDown, DollarSign, Bitcoin, Landmark, CreditCard, Handshake } from 'lucide-react';
 
 export const APP_NAME = "Asset Box";
 
@@ -23,7 +23,8 @@ export const ICONS = {
   Dollar: DollarSign,
   Crypto: Bitcoin,
   Bank: Landmark,
-  Debt: CreditCard
+  Debt: CreditCard,
+  Lent: Handshake
 };
 
 // Default exchange rate fallback strategy per PRD

@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { AppState, Asset, AssetType, Currency, Market, Liability, LiabilityType, BrokerageAccount } from '../types';
-import { Plus, Trash2, Wallet, Edit2, Coins, Banknote, Building, CreditCard, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Wallet, Edit2, Coins, Banknote, Building, CreditCard, AlertTriangle, Handshake, Gavel, History } from 'lucide-react';
 
 interface PortfolioProps {
   state: AppState;
-  activeTab: 'stocks' | 'crypto' | 'manual' | 'liabilities';
-  onTabChange: (tab: 'stocks' | 'crypto' | 'manual' | 'liabilities') => void;
+  activeTab: 'stocks' | 'crypto' | 'manual' | 'lent' | 'liabilities';
+  onTabChange: (tab: 'stocks' | 'crypto' | 'manual' | 'lent' | 'liabilities') => void;
   onAddAsset: (asset: Asset) => void;
   onUpdateAsset: (asset: Asset) => void;
   onRemoveAsset: (id: string) => void;
+  onLiquidateAsset: (id: string, exitPrice: number, exitDate: string, exitReason: string) => void;
   onAddLiability: (liability: Liability) => void;
   onUpdateLiability: (liability: Liability) => void;
   onRemoveLiability: (id: string) => void;
@@ -25,7 +26,8 @@ const Portfolio: React.FC<PortfolioProps> = ({
   onTabChange,
   onAddAsset, 
   onUpdateAsset,
-  onRemoveAsset, 
+  onRemoveAsset,
+  onLiquidateAsset,
   onAddLiability, 
   onUpdateLiability,
   onRemoveLiability, 
@@ -38,7 +40,7 @@ const Portfolio: React.FC<PortfolioProps> = ({
   
   // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
-  const [modalType, setModalType] = useState<'BROKERAGE' | 'STOCK' | 'CRYPTO' | 'MANUAL' | 'LIABILITY'>('STOCK');
+  const [modalType, setModalType] = useState<'BROKERAGE' | 'STOCK' | 'CRYPTO' | 'MANUAL' | 'LENT' | 'LIABILITY' | 'LIQUIDATE'>('STOCK');
   const [selectedBrokerageId, setSelectedBrokerageId] = useState<string>('');
   const [editingBrokerageId, setEditingBrokerageId] = useState<string | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
@@ -55,7 +57,21 @@ const Portfolio: React.FC<PortfolioProps> = ({
   const [formMarket, setFormMarket] = useState<Market>(Market.US);
   const [formValue, setFormValue] = useState('');
   const [formCurrency, setFormCurrency] = useState<Currency>(Currency.USD);
-  
+
+  // New Fields for Liability
+  const [formDueDate, setFormDueDate] = useState('');
+  const [formMonthlyInterest, setFormMonthlyInterest] = useState('');
+
+  // New Fields for Lent Money
+  const [formDebtor, setFormDebtor] = useState('');
+  const [formDateLent, setFormDateLent] = useState('');
+  const [formReturnDate, setFormReturnDate] = useState('');
+
+  // Fields for Liquidation
+  const [formExitPrice, setFormExitPrice] = useState('');
+  const [formExitDate, setFormExitDate] = useState('');
+  const [formExitReason, setFormExitReason] = useState('');
+
   const resetForm = () => {
     setFormName('');
     setFormSymbol('');
@@ -63,6 +79,15 @@ const Portfolio: React.FC<PortfolioProps> = ({
     setFormCost('');
     setFormValue('');
     setFormCurrency(Currency.USD);
+    setFormDueDate('');
+    setFormMonthlyInterest('');
+    setFormDebtor('');
+    setFormDateLent('');
+    setFormReturnDate('');
+    setFormExitPrice('');
+    setFormExitDate(new Date().toISOString().split('T')[0]);
+    setFormExitReason('');
+
     setShowAddModal(false);
     setSelectedBrokerageId('');
     setEditingBrokerageId(null);
@@ -74,6 +99,17 @@ const Portfolio: React.FC<PortfolioProps> = ({
   const handleDeleteClick = (id: string, type: 'ASSET' | 'LIABILITY') => {
       setDeleteTarget({ id, type });
       setShowDeleteConfirm(true);
+  };
+
+  const handleLiquidateClick = (asset: Asset) => {
+      setEditingAssetId(asset.id);
+      setModalType('LIQUIDATE');
+      setFormSymbol(asset.symbol || '');
+      setFormQuantity(asset.quantity?.toString() || '');
+      // Prefill exit price with current price if available
+      setFormExitPrice(asset.currentPrice?.toString() || '');
+      setFormExitDate(new Date().toISOString().split('T')[0]);
+      setShowAddModal(true);
   };
 
   const confirmDelete = () => {
@@ -133,6 +169,12 @@ const Portfolio: React.FC<PortfolioProps> = ({
           setFormSymbol(asset.symbol || '');
           setFormQuantity(asset.quantity?.toString() || '');
           setFormCost(asset.costBasis?.toString() || '');
+      } else if (asset.type === AssetType.LENT_MONEY) {
+          setModalType('LENT');
+          setFormDebtor(asset.debtorName || asset.name);
+          setFormValue(asset.manualValue?.toString() || '');
+          setFormDateLent(asset.dateLent || '');
+          setFormReturnDate(asset.expectedReturnDate || '');
       } else {
           setModalType('MANUAL');
           setFormName(asset.name);
@@ -146,6 +188,8 @@ const Portfolio: React.FC<PortfolioProps> = ({
       setModalType('LIABILITY');
       setFormName(liability.name);
       setFormValue(liability.totalAmount.toString());
+      setFormDueDate(liability.dueDate || '');
+      setFormMonthlyInterest(liability.monthlyInterest?.toString() || '');
       setShowAddModal(true);
   }
 
@@ -161,6 +205,12 @@ const Portfolio: React.FC<PortfolioProps> = ({
     setShowAddModal(true);
   }
 
+  const openAddLent = () => {
+    setModalType('LENT');
+    setEditingAssetId(null);
+    setShowAddModal(true);
+  }
+
   const openAddLiability = () => {
     setModalType('LIABILITY');
     setEditingAssetId(null);
@@ -170,6 +220,7 @@ const Portfolio: React.FC<PortfolioProps> = ({
   const handleAddNew = () => {
     if (activeTab === 'crypto') openAddCrypto();
     else if (activeTab === 'manual') openAddManual();
+    else if (activeTab === 'lent') openAddLent();
     else if (activeTab === 'liabilities') openAddLiability();
   };
 
@@ -179,7 +230,11 @@ const Portfolio: React.FC<PortfolioProps> = ({
     // Normalize Symbol here
     const cleanSymbol = formSymbol.trim().toUpperCase();
 
-    if (modalType === 'BROKERAGE') {
+    if (modalType === 'LIQUIDATE') {
+        if (editingAssetId) {
+            onLiquidateAsset(editingAssetId, parseFloat(formExitPrice), formExitDate, formExitReason);
+        }
+    } else if (modalType === 'BROKERAGE') {
       const inputVal = parseFloat(formValue) || 0;
       
       if (editingBrokerageId) {
@@ -259,13 +314,33 @@ const Portfolio: React.FC<PortfolioProps> = ({
              onAddAsset(commonAssetData as Asset);
         }
 
+    } else if (modalType === 'LENT') {
+        const commonAssetData = {
+            id: editingAssetId || Date.now().toString(),
+            name: formDebtor, // Store debtor name in name field for simplicity
+            debtorName: formDebtor,
+            type: AssetType.LENT_MONEY,
+            currency: Currency.CNY, // Assuming Lent money is same as base for now, or could add selector
+            manualValue: parseFloat(formValue) || 0,
+            dateLent: formDateLent,
+            expectedReturnDate: formReturnDate
+        };
+        if (editingAssetId) {
+             const existing = state.assets.find(a => a.id === editingAssetId);
+             onUpdateAsset({ ...existing, ...commonAssetData } as Asset);
+        } else {
+             onAddAsset(commonAssetData as Asset);
+        }
+
     } else if (modalType === 'LIABILITY') {
         const commonLiabData = {
             id: editingAssetId || Date.now().toString(),
             name: formName,
             type: LiabilityType.LOAN,
             totalAmount: parseFloat(formValue),
-            currency: Currency.CNY
+            currency: Currency.CNY,
+            dueDate: formDueDate,
+            monthlyInterest: parseFloat(formMonthlyInterest) || 0
          };
          if (editingAssetId) {
              const existing = state.liabilities.find(l => l.id === editingAssetId);
@@ -327,17 +402,18 @@ const Portfolio: React.FC<PortfolioProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-4 border-b border-white/10 pb-4">
+      <div className="flex gap-4 border-b border-white/10 pb-4 overflow-x-auto">
         {[
           { id: 'stocks', icon: Building, label: 'Stocks' },
           { id: 'crypto', icon: Coins, label: 'Crypto' },
           { id: 'manual', icon: Banknote, label: 'Cash / Other' },
+          { id: 'lent', icon: Handshake, label: 'Money Lent' },
           { id: 'liabilities', icon: CreditCard, label: 'Liabilities' }
         ].map(tab => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id as any)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
               activeTab === tab.id ? 'bg-white/10 text-white' : 'text-brand-muted hover:text-white'
             }`}
           >
@@ -365,27 +441,18 @@ const Portfolio: React.FC<PortfolioProps> = ({
                 return sum + ((asset.currentPrice || 0) * (asset.quantity || 0));
             }, 0);
 
-            // Calculate Daily P/L Logic for Brokerage Header
-            // The assets have `dailyChangeVal` in BASE CURRENCY (CNY)
-            // We need to aggregate this and display it.
-            // Option 1: Display in Base (CNY)
-            // Option 2: Convert back to Native
             const dailyPnLBase = accountAssets.reduce((sum, a) => sum + (a.dailyChangeVal || 0), 0);
             
             // Convert Base PnL to Native for consistent display with Stock Value
             const rateBaseToNative = getExchangeRate(Currency.CNY, account.currency);
             const dailyPnLNative = dailyPnLBase * rateBaseToNative;
             
-            // Calculate Yield: Daily Gain / (Current Value - Daily Gain)
-            // Or strictly: Daily Gain / (Current Value at 00:00)
             const prevValueNative = stocksValueNative - dailyPnLNative;
             const dailyYieldPct = prevValueNative !== 0 ? (dailyPnLNative / prevValueNative) * 100 : 0;
 
-            // Available Cash is manually set in Native
             const availableCashNative = account.availableCash || 0;
             const totalNetAssetsNative = availableCashNative + stocksValueNative;
             
-            // Convert Total to CNY for secondary display
             const rateToCNY = getExchangeRate(account.currency, Currency.CNY);
             const totalNetAssetsCNY = totalNetAssetsNative * rateToCNY;
 
@@ -409,7 +476,7 @@ const Portfolio: React.FC<PortfolioProps> = ({
                         </div>
                      </div>
                      <button onClick={() => onRemoveBrokerage(account.id)} className="text-red-500 hover:text-red-400 text-xs flex items-center gap-1">
-                        <Trash2 className="w-3 h-3" /> Delete
+                        <Trash2 className="w-3 h-3" /> Delete Account
                      </button>
                   </div>
                   
@@ -490,8 +557,8 @@ const Portfolio: React.FC<PortfolioProps> = ({
                                         <button onClick={() => openEditAsset(asset)} className="p-2 hover:bg-white/10 text-brand-muted hover:text-brand-green rounded transition-colors" title="Edit">
                                             <Edit2 className="w-4 h-4" />
                                         </button>
-                                        <button onClick={() => handleDeleteClick(asset.id, 'ASSET')} className="p-2 hover:bg-red-500/20 text-brand-muted hover:text-red-500 rounded transition-colors" title="Delete">
-                                            <Trash2 className="w-4 h-4" />
+                                        <button onClick={() => handleLiquidateClick(asset)} className="p-2 hover:bg-white/10 text-brand-muted hover:text-brand-green rounded transition-colors" title="Liquidate / Clear Position">
+                                            <Gavel className="w-4 h-4" />
                                         </button>
                                      </div>
                                   </td>
@@ -516,6 +583,51 @@ const Portfolio: React.FC<PortfolioProps> = ({
               </div>
             );
           })}
+          
+          {/* Cleared Stocks List */}
+          {state.clearedAssets && state.clearedAssets.length > 0 && (
+              <div className="bg-brand-card rounded-xl border border-white/5 overflow-hidden mt-8">
+                  <div className="p-6 border-b border-white/5 flex items-center gap-3">
+                      <div className="p-2 bg-gray-500/10 rounded-lg text-gray-500">
+                          <History className="w-5 h-5" />
+                      </div>
+                      <h3 className="text-xl font-bold text-brand-muted">Cleared Stock History</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                          <thead className="bg-white/5 text-xs text-brand-muted uppercase tracking-wider">
+                              <tr>
+                                  <th className="p-4 pl-6">Stock ID</th>
+                                  <th className="p-4">Name</th>
+                                  <th className="p-4 text-right">Qty</th>
+                                  <th className="p-4 text-right">Exit Price</th>
+                                  <th className="p-4 text-right">Total Value</th>
+                                  <th className="p-4 text-right">P/L</th>
+                                  <th className="p-4 text-right pr-6">Exit Date</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5">
+                              {state.clearedAssets.map((asset, idx) => {
+                                  const sym = getCurrencySymbol(asset.currency || Currency.USD);
+                                  return (
+                                      <tr key={idx} className="hover:bg-white/5 transition-colors">
+                                          <td className="p-4 pl-6 font-medium text-brand-muted">{asset.symbol}</td>
+                                          <td className="p-4 text-brand-muted">{asset.name}</td>
+                                          <td className="p-4 text-right text-brand-muted font-mono">{asset.quantity}</td>
+                                          <td className="p-4 text-right text-brand-muted font-mono">{sym}{asset.exitPrice}</td>
+                                          <td className="p-4 text-right text-brand-muted font-mono">{sym}{asset.exitTotalValue.toLocaleString()}</td>
+                                          <td className={`p-4 text-right font-mono ${asset.realizedPnL >= 0 ? 'text-brand-green' : 'text-brand-red'}`}>
+                                              {asset.realizedPnL >= 0 ? '+' : ''}{asset.realizedPnL.toFixed(2)}
+                                          </td>
+                                          <td className="p-4 text-right text-brand-muted pr-6">{asset.exitDate}</td>
+                                      </tr>
+                                  )
+                              })}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+          )}
         </div>
       )}
 
@@ -525,9 +637,11 @@ const Portfolio: React.FC<PortfolioProps> = ({
             <table className="w-full text-left">
                <thead className="bg-white/5 text-xs text-brand-muted uppercase tracking-wider">
                   <tr>
-                     <th className="p-4 pl-6">Name / Symbol</th>
+                     <th className="p-4 pl-6">Name / Details</th>
                      {activeTab === 'crypto' && <th className="p-4 text-right">Quantity</th>}
                      {activeTab === 'crypto' && <th className="p-4 text-right">Price</th>}
+                     {activeTab === 'liabilities' && <th className="p-4 text-right">Details</th>}
+                     {activeTab === 'lent' && <th className="p-4 text-right">Dates</th>}
                      <th className="p-4 text-right">Total Value (Base)</th>
                      <th className="p-4 text-right pr-6">Action</th>
                   </tr>
@@ -536,7 +650,14 @@ const Portfolio: React.FC<PortfolioProps> = ({
                   {activeTab === 'liabilities' 
                      ? state.liabilities.map(l => (
                         <tr key={l.id} className="hover:bg-white/5">
-                           <td className="p-4 pl-6 text-white">{l.name}</td>
+                           <td className="p-4 pl-6 text-white">
+                               <div className="font-bold">{l.name}</div>
+                               <div className="text-xs text-brand-muted mt-1">{l.type}</div>
+                           </td>
+                           <td className="p-4 text-right text-xs text-brand-muted">
+                               {l.dueDate && <div className="mb-1">Due: {l.dueDate}</div>}
+                               {l.monthlyInterest ? <div>Int/Mo: {l.monthlyInterest}</div> : null}
+                           </td>
                            <td className="p-4 text-right font-mono text-white">{l.totalAmount.toLocaleString()}</td>
                            <td className="p-4 text-right pr-6">
                                <div className="flex items-center justify-end gap-2">
@@ -550,15 +671,25 @@ const Portfolio: React.FC<PortfolioProps> = ({
                            </td>
                         </tr>
                      ))
-                     : state.assets.filter(a => (activeTab === 'crypto' ? a.type === AssetType.CRYPTO : (a.type !== AssetType.STOCK && a.type !== AssetType.CRYPTO))).map(a => (
+                     : state.assets.filter(a => {
+                         if (activeTab === 'crypto') return a.type === AssetType.CRYPTO;
+                         if (activeTab === 'lent') return a.type === AssetType.LENT_MONEY;
+                         return (a.type !== AssetType.STOCK && a.type !== AssetType.CRYPTO && a.type !== AssetType.LENT_MONEY);
+                     }).map(a => (
                         <tr key={a.id} className="hover:bg-white/5">
                            <td className="p-4 pl-6 text-white">
-                              {a.symbol || a.name}
+                              <div className="font-medium">{activeTab === 'lent' ? (a.debtorName || a.name) : (a.symbol || a.name)}</div>
                            </td>
                            {activeTab === 'crypto' && <td className="p-4 text-right text-brand-muted font-mono">{a.quantity}</td>}
                            {activeTab === 'crypto' && <td className="p-4 text-right text-brand-muted font-mono">
                                ${a.currentPrice?.toFixed(2)}
                            </td>}
+                           {activeTab === 'lent' && (
+                               <td className="p-4 text-right text-xs text-brand-muted">
+                                   <div>Lent: {a.dateLent || '-'}</div>
+                                   <div>Exp: {a.expectedReturnDate || '-'}</div>
+                               </td>
+                           )}
                            <td className="p-4 text-right font-mono text-white">
                               <div>¥{(a.currentValue || a.manualValue || 0).toLocaleString()}</div>
                               {activeTab === 'crypto' && a.totalReturnPct !== undefined && (
@@ -580,8 +711,12 @@ const Portfolio: React.FC<PortfolioProps> = ({
                         </tr>
                      ))
                   }
-                  {((activeTab === 'liabilities' && state.liabilities.length === 0) || (activeTab !== 'liabilities' && state.assets.filter(a => activeTab === 'crypto' ? a.type === AssetType.CRYPTO : a.type !== AssetType.STOCK && a.type !== AssetType.CRYPTO).length === 0)) && (
-                     <tr><td colSpan={5} className="p-8 text-center text-brand-muted">No items found.</td></tr>
+                  {((activeTab === 'liabilities' && state.liabilities.length === 0) || (activeTab !== 'liabilities' && state.assets.filter(a => {
+                      if (activeTab === 'crypto') return a.type === AssetType.CRYPTO;
+                      if (activeTab === 'lent') return a.type === AssetType.LENT_MONEY;
+                      return (a.type !== AssetType.STOCK && a.type !== AssetType.CRYPTO && a.type !== AssetType.LENT_MONEY);
+                  }).length === 0)) && (
+                     <tr><td colSpan={6} className="p-8 text-center text-brand-muted">No items found.</td></tr>
                   )}
                </tbody>
             </table>
@@ -590,16 +725,42 @@ const Portfolio: React.FC<PortfolioProps> = ({
 
       {/* Unified Modal */}
       {showAddModal && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in p-4">
-            <div className="bg-brand-card w-full max-w-md p-6 rounded-2xl border border-white/10 shadow-2xl">
+         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in p-4 overflow-y-auto">
+            <div className="bg-brand-card w-full max-w-md p-6 rounded-2xl border border-white/10 shadow-2xl my-8">
                <h3 className="text-xl font-bold text-white mb-6">
                   {modalType === 'BROKERAGE' ? (editingBrokerageId ? 'Edit Account' : 'New Securities Account') : 
                    modalType === 'STOCK' ? (editingAssetId ? 'Edit Position' : 'Add Stock Position') : 
                    modalType === 'CRYPTO' ? (editingAssetId ? 'Edit Crypto' : 'Add Crypto') :
+                   modalType === 'LIQUIDATE' ? 'Liquidate / Clear Position' :
+                   modalType === 'LENT' ? (editingAssetId ? 'Edit Loan' : 'Add Money Lent') :
                    modalType === 'LIABILITY' ? (editingAssetId ? 'Edit Liability' : 'Add Liability') : (editingAssetId ? 'Edit Asset' : 'Add Manual Asset')}
                </h3>
                <form onSubmit={handleSubmit} className="space-y-4">
                   
+                  {modalType === 'LIQUIDATE' && (
+                      <>
+                        <div className="bg-brand-green/10 p-4 rounded-lg text-sm text-brand-green mb-4">
+                            Clearing a position moves it to history and updates your cash balance.
+                        </div>
+                        <div>
+                           <label className="block text-xs text-brand-muted mb-1">Stock Name/ID</label>
+                           <input disabled value={formSymbol} className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-white cursor-not-allowed" />
+                        </div>
+                        <div>
+                           <label className="block text-xs text-brand-muted mb-1">Clearing Price</label>
+                           <input required type="number" step="any" value={formExitPrice} onChange={e => setFormExitPrice(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
+                        </div>
+                        <div>
+                           <label className="block text-xs text-brand-muted mb-1">Clearing Date</label>
+                           <input required type="date" value={formExitDate} onChange={e => setFormExitDate(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
+                        </div>
+                        <div>
+                           <label className="block text-xs text-brand-muted mb-1">Reason</label>
+                           <textarea value={formExitReason} onChange={e => setFormExitReason(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" placeholder="Target reached / Stop loss..." rows={3} />
+                        </div>
+                      </>
+                  )}
+
                   {modalType === 'BROKERAGE' && (
                      <>
                         <div>
@@ -659,7 +820,30 @@ const Portfolio: React.FC<PortfolioProps> = ({
                      </>
                   )}
                   
-                  {(modalType === 'MANUAL' || modalType === 'LIABILITY') && (
+                  {modalType === 'LENT' && (
+                      <>
+                        <div>
+                           <label className="block text-xs text-brand-muted mb-1">Debtor Name (Who owes you?)</label>
+                           <input required value={formDebtor} onChange={e => setFormDebtor(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
+                        </div>
+                        <div>
+                           <label className="block text-xs text-brand-muted mb-1">Amount</label>
+                           <input required type="number" step="any" value={formValue} onChange={e => setFormValue(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" placeholder="0.00" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                               <label className="block text-xs text-brand-muted mb-1">Date Lent</label>
+                               <input type="date" value={formDateLent} onChange={e => setFormDateLent(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
+                            </div>
+                            <div>
+                               <label className="block text-xs text-brand-muted mb-1">Expected Return</label>
+                               <input type="date" value={formReturnDate} onChange={e => setFormReturnDate(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
+                            </div>
+                        </div>
+                      </>
+                  )}
+
+                  {modalType === 'MANUAL' && (
                       <>
                         <div>
                            <label className="block text-xs text-brand-muted mb-1">Name</label>
@@ -668,6 +852,29 @@ const Portfolio: React.FC<PortfolioProps> = ({
                         <div>
                            <label className="block text-xs text-brand-muted mb-1">Value/Amount</label>
                            <input required type="number" step="any" value={formValue} onChange={e => setFormValue(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" placeholder="0.00" />
+                        </div>
+                      </>
+                  )}
+
+                  {modalType === 'LIABILITY' && (
+                      <>
+                        <div>
+                           <label className="block text-xs text-brand-muted mb-1">Name</label>
+                           <input required value={formName} onChange={e => setFormName(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
+                        </div>
+                        <div>
+                           <label className="block text-xs text-brand-muted mb-1">Total Amount</label>
+                           <input required type="number" step="any" value={formValue} onChange={e => setFormValue(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" placeholder="0.00" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                               <label className="block text-xs text-brand-muted mb-1">Due Date</label>
+                               <input type="date" value={formDueDate} onChange={e => setFormDueDate(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" />
+                            </div>
+                            <div>
+                               <label className="block text-xs text-brand-muted mb-1">Monthly Interest</label>
+                               <input type="number" step="any" value={formMonthlyInterest} onChange={e => setFormMonthlyInterest(e.target.value)} className="w-full bg-brand-dark border border-white/10 rounded-lg p-3 text-white focus:border-brand-green outline-none" placeholder="0.00" />
+                            </div>
                         </div>
                       </>
                   )}
@@ -688,7 +895,7 @@ const Portfolio: React.FC<PortfolioProps> = ({
                 <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4 text-red-500">
                     <AlertTriangle className="w-6 h-6" />
                 </div>
-                <h3 className="text-lg font-bold text-white mb-2">Delete Asset?</h3>
+                <h3 className="text-lg font-bold text-white mb-2">Delete Item?</h3>
                 <p className="text-sm text-brand-muted mb-6">Are you sure you want to delete this item? This action cannot be undone.</p>
                 <div className="flex gap-3">
                     <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg font-medium transition-colors">Cancel</button>

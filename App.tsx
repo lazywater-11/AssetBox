@@ -4,7 +4,7 @@ import Dashboard from './components/Dashboard';
 import Portfolio from './components/Portfolio';
 import Journal from './components/Journal';
 import Login from './components/Login';
-import { AppState, Asset, AssetType, Currency, Liability, JournalEntry, BrokerageAccount, Market } from './types';
+import { AppState, Asset, AssetType, Currency, Liability, JournalEntry, BrokerageAccount, Market, ClearedAsset } from './types';
 import { loadRemoteState, saveRemoteState, INITIAL_STATE } from './services/storageService';
 import { fetchCryptoPrices, fetchExchangeRates, fetchStockPrices } from './services/apiService';
 import { DEFAULT_HKD_CNY_RATE } from './constants';
@@ -21,19 +21,23 @@ const App: React.FC = () => {
 
   // App State
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [activePortfolioTab, setActivePortfolioTab] = useState<'stocks' | 'crypto' | 'manual' | 'liabilities'>('stocks');
+  const [activePortfolioTab, setActivePortfolioTab] = useState<'stocks' | 'crypto' | 'manual' | 'lent' | 'liabilities'>('stocks');
   const [state, setState] = useState<AppState>(INITIAL_STATE);
   const [exchangeRates, setExchangeRates] = useState({ USD: 7.2, HKD: DEFAULT_HKD_CNY_RATE, CNY: 1 });
   const [priceLoading, setPriceLoading] = useState(false);
 
-  // Use a ref to track the latest state for the interval closure
+  // Use refs to track state for closures
   const stateRef = useRef(state);
+  const userRef = useRef<User | null>(null);
+
+  useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { userRef.current = user; }, [user]);
   
   // 1. Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
       if (currentUser) {
+        setUser(currentUser);
         // Load data from Firebase
         setDataLoading(true);
         const remoteData = await loadRemoteState(currentUser.uid);
@@ -42,7 +46,12 @@ const App: React.FC = () => {
         // Trigger price refresh after data load
         refreshData(remoteData.assets, remoteData);
       } else {
-        setState(INITIAL_STATE);
+        // Only clear state if we are NOT in guest mode
+        // If userRef.current is 'guest', we ignore the firebase 'null' event
+        if (userRef.current?.uid !== 'guest') {
+            setUser(null);
+            setState(INITIAL_STATE);
+        }
       }
       setAuthLoading(false);
     });
@@ -51,11 +60,7 @@ const App: React.FC = () => {
 
   // 2. Auto-Save to Firebase (Debounced or on state change)
   useEffect(() => {
-    stateRef.current = state;
     if (user && !dataLoading) {
-      // Save to Firebase
-      // Ideally debounce this in a real app, but for now simple effect is fine
-      // We check !dataLoading to avoid saving the initial empty state over remote state during load
       saveRemoteState(user.uid, state);
     }
   }, [state, user, dataLoading]);
@@ -76,11 +81,48 @@ const App: React.FC = () => {
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
       console.error("Login failed", error);
-      alert("Login failed. Please check your configuration.");
+      alert("Login failed. Please check your domain configuration in Firebase Console. You can use Guest Mode to test.");
     }
   };
 
+  const handleGuestLogin = async () => {
+      const guestUser = {
+          uid: 'guest',
+          email: 'guest@demo.com',
+          displayName: 'Guest User',
+          photoURL: null,
+          emailVerified: true,
+          isAnonymous: true,
+          metadata: {},
+          providerData: [],
+          refreshToken: '',
+          tenantId: null,
+          delete: async () => {},
+          getIdToken: async () => '',
+          getIdTokenResult: async () => ({} as any),
+          reload: async () => {},
+          toJSON: () => ({}),
+          phoneNumber: null,
+          providerId: 'guest'
+      } as unknown as User;
+
+      setUser(guestUser);
+      setAuthLoading(false);
+
+      setDataLoading(true);
+      const guestData = await loadRemoteState('guest');
+      setState(guestData);
+      setDataLoading(false);
+      refreshData(guestData.assets, guestData);
+  };
+
   const handleLogout = async () => {
+    if (user?.uid === 'guest') {
+        setUser(null);
+        setState(INITIAL_STATE);
+        return;
+    }
+
     try {
       await signOut(auth);
     } catch (error) {
@@ -158,7 +200,17 @@ const App: React.FC = () => {
             }
          }
       } else {
+         // Manual Assets & Lent Money
          currentValue = asset.manualValue || 0;
+         // If Lent Money is in a different currency (e.g. USD), convert it to Base (CNY)
+         // Assuming manualValue is stored in `asset.currency`
+         // Simplified: In this app, manual value is often treated as base value for simplicity unless we enhance it.
+         // Let's enhance it slightly:
+         if (asset.currency !== currentState.baseCurrency) {
+             if (currentState.baseCurrency === Currency.CNY && asset.currency === Currency.USD) currentValue = currentValue * usdToCny;
+             if (currentState.baseCurrency === Currency.CNY && asset.currency === Currency.HKD) currentValue = currentValue * hkdToCny;
+             if (currentState.baseCurrency === Currency.USD && asset.currency === Currency.CNY) currentValue = currentValue / usdToCny;
+         }
       }
 
       return {
@@ -263,6 +315,68 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, assets: prev.assets.filter(a => a.id !== id) }));
   };
 
+  // Logic for Clearing/Liquidating a Stock
+  const liquidateAsset = (id: string, exitPrice: number, exitDate: string, exitReason: string) => {
+    setState(prev => {
+       const asset = prev.assets.find(a => a.id === id);
+       if (!asset) return prev;
+
+       // Create History Record
+       const quantity = asset.quantity || 0;
+       const costBasis = asset.costBasis || 0;
+       const realizedPnL = (exitPrice - costBasis) * quantity;
+       const exitTotalValue = exitPrice * quantity; // Native
+       
+       // Rough estimation of Base value, uses current exchange rate from state (may vary slightly from reality but sufficient for history)
+       let exitTotalValueBase = exitTotalValue;
+       if (asset.market === Market.US && prev.baseCurrency === Currency.CNY) exitTotalValueBase *= exchangeRates.USD;
+       else if (asset.market === Market.HK && prev.baseCurrency === Currency.CNY) exitTotalValueBase *= exchangeRates.HKD;
+
+       const clearedItem: ClearedAsset = {
+          id: asset.id,
+          symbol: asset.symbol || '',
+          name: asset.name,
+          quantity: quantity,
+          market: asset.market || Market.US,
+          currency: asset.currency,
+          buyCostBasis: costBasis,
+          exitPrice: exitPrice,
+          exitDate: exitDate,
+          exitReason: exitReason,
+          exitTotalValue,
+          exitTotalValueBase,
+          realizedPnL,
+          clearedAt: new Date().toISOString()
+       };
+
+       const newAssets = prev.assets.filter(a => a.id !== id);
+       const newState = {
+          ...prev,
+          assets: newAssets,
+          clearedAssets: [clearedItem, ...(prev.clearedAssets || [])]
+       };
+
+       // Also need to Update Brokerage Cash Balance!
+       // When you sell, cash increases.
+       if (asset.brokerageAccountId) {
+           const brokerage = prev.brokerageAccounts.find(b => b.id === asset.brokerageAccountId);
+           if (brokerage) {
+               // Assuming exitPrice is in the brokerage's currency for simplicity in this MVP
+               // Ideally, we check asset.market currency vs brokerage currency. 
+               // Assuming standard matching (US stock in USD account).
+               const updatedBrokerage = {
+                   ...brokerage,
+                   availableCash: (brokerage.availableCash || 0) + exitTotalValue
+               };
+               newState.brokerageAccounts = prev.brokerageAccounts.map(b => b.id === brokerage.id ? updatedBrokerage : b);
+           }
+       }
+
+       setTimeout(() => refreshData(newAssets, newState), 0);
+       return newState;
+    });
+  };
+
   const addLiability = (liab: Liability) => {
      setState(prev => ({ ...prev, liabilities: [...prev.liabilities, liab]}));
   };
@@ -308,7 +422,7 @@ const App: React.FC = () => {
     }));
   };
 
-  const handleNavigate = (tab: string, subTab?: 'stocks' | 'crypto' | 'manual' | 'liabilities') => {
+  const handleNavigate = (tab: string, subTab?: 'stocks' | 'crypto' | 'manual' | 'lent' | 'liabilities') => {
     setActiveTab(tab);
     if (subTab) {
       setActivePortfolioTab(subTab);
@@ -322,7 +436,7 @@ const App: React.FC = () => {
   }
 
   if (!user) {
-      return <Login onLogin={handleLogin} loading={authLoading} />;
+      return <Login onLogin={handleLogin} onGuestLogin={handleGuestLogin} loading={authLoading} />;
   }
 
   return (
@@ -374,6 +488,7 @@ const App: React.FC = () => {
             onAddAsset={addAsset}
             onUpdateAsset={updateAsset} 
             onRemoveAsset={removeAsset}
+            onLiquidateAsset={liquidateAsset}
             onAddLiability={addLiability}
             onUpdateLiability={updateLiability}
             onRemoveLiability={removeLiability}
@@ -408,6 +523,7 @@ const App: React.FC = () => {
               </button>
               <div className="mt-8 pt-8 border-t border-white/5">
                 <p className="text-xs text-brand-muted">User ID: {user.uid}</p>
+                {user.uid === 'guest' && <p className="text-xs text-brand-green mt-2">Guest Mode: Data saved locally.</p>}
               </div>
            </div>
         )}

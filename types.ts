@@ -4,6 +4,7 @@ export enum AssetType {
   STOCK = 'STOCK',
   CRYPTO = 'CRYPTO',
   REAL_ESTATE = 'REAL_ESTATE',
+  LENT_MONEY = 'LENT_MONEY', // New Type
   OTHER = 'OTHER'
 }
 
@@ -37,17 +38,25 @@ export interface BrokerageAccount {
 
 export interface Asset {
   id: string;
-  name: string;
+  name: string; // Used for Stock Name, Cash Name, or Debtor Name (Lent Money)
   type: AssetType;
-  // For Manual Assets
+  
+  // For Manual Assets (Cash, Real Estate, Lent Money)
   manualValue?: number;
   currency: Currency;
+
+  // For Lent Money
+  debtorName?: string; // Explicit field, though we can map to name
+  dateLent?: string;
+  expectedReturnDate?: string;
+
   // For API Assets
   symbol?: string; // e.g., AAPL, BTC, 00700
   market?: Market; // For stocks
   quantity?: number;
   costBasis?: number; // Optional, for P/L calculation
   brokerageAccountId?: string; // Link to a brokerage account
+  
   // Calculated at runtime
   currentPrice?: number;
   currentValue?: number; // In Base Currency
@@ -56,15 +65,33 @@ export interface Asset {
   dailyChangeVal?: number;
 }
 
+export interface ClearedAsset {
+  id: string; // Original Asset ID
+  symbol: string;
+  name: string;
+  quantity: number;
+  market: Market;
+  currency: Currency;
+  buyCostBasis: number; // Original avg cost
+  exitPrice: number; // Price at liquidation
+  exitDate: string;
+  exitReason: string;
+  exitTotalValue: number; // quantity * exitPrice (Native Currency)
+  exitTotalValueBase: number; // Converted to Base Currency at time of clearing (simplified)
+  realizedPnL: number; // (exitPrice - buyCostBasis) * quantity
+  clearedAt: string; // Timestamp
+}
+
 export interface Liability {
   id: string;
   name: string;
   type: LiabilityType;
   totalAmount: number;
   currency: Currency;
-  interestRate?: number;
+  interestRate?: number; // Annual Rate maybe?
+  monthlyInterest?: number; // Manual input as requested
+  dueDate?: string; // Manual input as requested
   monthlyPayment?: number;
-  dueDate?: string;
 }
 
 export interface JournalEntry {
@@ -72,8 +99,6 @@ export interface JournalEntry {
   date: string;
   title: string;
   content: string; // Markdown supported
-  // Removed relatedAssetId and tags from UI requirements, keeping optional in type for data compatibility if needed, 
-  // but logically we can ignore them or keep them.
   relatedAssetId?: string;
   tags?: string[]; 
 }
@@ -87,6 +112,7 @@ export interface AppState {
   baseCurrency: Currency;
   brokerageAccounts: BrokerageAccount[];
   assets: Asset[];
+  clearedAssets: ClearedAsset[]; // New List for History
   liabilities: Liability[];
   journal: JournalEntry[];
   history: HistoryPoint[];

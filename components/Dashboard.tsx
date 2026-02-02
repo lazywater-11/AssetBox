@@ -6,7 +6,7 @@ import { ICONS } from '../constants';
 interface DashboardProps {
   state: AppState;
   exchangeRate: number; // USD to Base
-  onNavigate: (tab: string, subTab?: 'stocks' | 'crypto' | 'manual' | 'liabilities') => void;
+  onNavigate: (tab: string, subTab?: 'stocks' | 'crypto' | 'manual' | 'lent' | 'liabilities') => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ state, exchangeRate, onNavigate }) => {
@@ -15,10 +15,12 @@ const Dashboard: React.FC<DashboardProps> = ({ state, exchangeRate, onNavigate }
   const stockAssets = state.assets.filter(a => a.type === AssetType.STOCK);
   const cryptoAssets = state.assets.filter(a => a.type === AssetType.CRYPTO);
   const manualAssets = state.assets.filter(a => a.type === AssetType.CASH || a.type === AssetType.REAL_ESTATE || a.type === AssetType.OTHER);
+  const lentAssets = state.assets.filter(a => a.type === AssetType.LENT_MONEY);
 
   // Totals in CNY (Base)
   const cryptoTotal = cryptoAssets.reduce((sum, a) => sum + (a.currentValue || 0), 0);
   const manualTotal = manualAssets.reduce((sum, a) => sum + (a.currentValue || 0), 0);
+  const lentTotal = lentAssets.reduce((sum, a) => sum + (a.currentValue || 0), 0);
   
   let totalBrokerageNetWorthCNY = 0;
   
@@ -36,7 +38,8 @@ const Dashboard: React.FC<DashboardProps> = ({ state, exchangeRate, onNavigate }
       totalBrokerageNetWorthCNY += (stockValCNY + cashValCNY);
   });
 
-  const totalAssets = totalBrokerageNetWorthCNY + cryptoTotal + manualTotal;
+  // Include Lent Money in Total Assets
+  const totalAssets = totalBrokerageNetWorthCNY + cryptoTotal + manualTotal + lentTotal;
 
   const calculateTotalLiabilities = () => {
     return state.liabilities.reduce((sum, liab) => {
@@ -166,12 +169,13 @@ const Dashboard: React.FC<DashboardProps> = ({ state, exchangeRate, onNavigate }
       </div>
 
       {/* Detailed Asset Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      {/* Changed to flex-wrap to accommodate 5th card nicely */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6">
         
         {/* Securities / Stock Card */}
         <div 
           onClick={() => onNavigate('portfolio', 'stocks')}
-          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-brand-green/30 transition-all cursor-pointer group"
+          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-brand-green/30 transition-all cursor-pointer group h-full"
         >
           <div className="flex items-center gap-3 mb-4">
              <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500">
@@ -198,7 +202,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, exchangeRate, onNavigate }
 
                  return (
                    <div key={account.id} className="flex justify-between items-center text-sm">
-                      <span className="text-white">{account.name}</span>
+                      <span className="text-white truncate max-w-[100px]">{account.name}</span>
                       <span className="font-mono text-brand-muted">{formatCurrency(totalCNY)}</span>
                    </div>
                  );
@@ -209,7 +213,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, exchangeRate, onNavigate }
         {/* Crypto Card */}
         <div 
           onClick={() => onNavigate('portfolio', 'crypto')}
-          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-brand-green/30 transition-all cursor-pointer group"
+          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-brand-green/30 transition-all cursor-pointer group h-full"
         >
           <div className="flex items-center gap-3 mb-4">
              <div className="p-2 bg-yellow-500/10 rounded-lg text-yellow-500">
@@ -235,7 +239,7 @@ const Dashboard: React.FC<DashboardProps> = ({ state, exchangeRate, onNavigate }
         {/* Cash Card */}
         <div 
           onClick={() => onNavigate('portfolio', 'manual')}
-          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-brand-green/30 transition-all cursor-pointer group"
+          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-brand-green/30 transition-all cursor-pointer group h-full"
         >
           <div className="flex items-center gap-3 mb-4">
              <div className="p-2 bg-brand-green/10 rounded-lg text-brand-green">
@@ -258,10 +262,36 @@ const Dashboard: React.FC<DashboardProps> = ({ state, exchangeRate, onNavigate }
           </div>
         </div>
 
+        {/* Money Lent Card (New) */}
+        <div 
+          onClick={() => onNavigate('portfolio', 'lent')}
+          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-purple-500/30 transition-all cursor-pointer group h-full"
+        >
+          <div className="flex items-center gap-3 mb-4">
+             <div className="p-2 bg-purple-500/10 rounded-lg text-purple-500">
+                <ICONS.Lent className="w-5 h-5"/>
+             </div>
+             <div>
+                <span className="text-brand-muted text-xs uppercase tracking-wider font-bold">Money Lent</span>
+                <div className="font-mono text-white font-bold">{formatCurrency(lentTotal)}</div>
+             </div>
+          </div>
+          <div className="space-y-2">
+             {lentAssets.length === 0 && <span className="text-xs text-brand-muted italic">No receivables</span>}
+             {getTopItems(lentAssets).map(a => (
+               <div key={a.id} className="flex justify-between items-center text-sm">
+                  <span className="text-white truncate">{a.debtorName || a.name}</span>
+                  <span className="font-mono text-brand-muted">{formatCurrency(a.currentValue || 0)}</span>
+               </div>
+             ))}
+             {lentAssets.length > 3 && <div className="text-xs text-brand-muted text-center pt-1">...</div>}
+          </div>
+        </div>
+
         {/* Liabilities Card */}
         <div 
           onClick={() => onNavigate('portfolio', 'liabilities')}
-          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-red-500/30 transition-all cursor-pointer group"
+          className="bg-brand-card rounded-2xl p-6 border border-white/5 hover:border-red-500/30 transition-all cursor-pointer group h-full"
         >
           <div className="flex items-center gap-3 mb-4">
              <div className="p-2 bg-red-500/10 rounded-lg text-red-500">

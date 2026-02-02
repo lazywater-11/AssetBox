@@ -6,14 +6,30 @@ export const INITIAL_STATE: AppState = {
   baseCurrency: Currency.CNY,
   brokerageAccounts: [],
   assets: [],
+  clearedAssets: [], // Initialize empty
   liabilities: [],
   journal: [],
   history: []
 };
 
+const GUEST_STORAGE_KEY = 'asset_box_guest_data';
+
 // --- Remote Storage (Firestore) ---
 
 export const loadRemoteState = async (userId: string): Promise<AppState> => {
+  // Guest Mode Handling
+  if (userId === 'guest') {
+    try {
+      const localData = localStorage.getItem(GUEST_STORAGE_KEY);
+      if (localData) {
+        return { ...INITIAL_STATE, ...JSON.parse(localData) };
+      }
+    } catch (e) {
+      console.warn("Failed to load guest data", e);
+    }
+    return INITIAL_STATE;
+  }
+
   try {
     const docRef = doc(db, "users", userId);
     const docSnap = await getDoc(docRef);
@@ -33,6 +49,16 @@ export const loadRemoteState = async (userId: string): Promise<AppState> => {
 };
 
 export const saveRemoteState = async (userId: string, state: AppState) => {
+  // Guest Mode Handling
+  if (userId === 'guest') {
+    try {
+      localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.error("Failed to save guest data", e);
+    }
+    return;
+  }
+
   try {
     const docRef = doc(db, "users", userId);
     // We store it under an 'appState' field

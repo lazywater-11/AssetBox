@@ -40,15 +40,20 @@ export const fetchStockPrices = async (assets: Asset[]): Promise<Record<string, 
     } else if (a.market === Market.CN) {
        // Intelligent prefix logic for A-shares
        const lowerSym = sym.toLowerCase();
-       if (lowerSym.startsWith('sh') || lowerSym.startsWith('sz')) {
+       if (lowerSym.startsWith('sh') || lowerSym.startsWith('sz') || lowerSym.startsWith('bj')) {
           fullCode = lowerSym;
        } else {
           // Auto-guess based on standard Chinese market rules
-          if (sym.startsWith('6')) {
+          // SH: 6 (Main/STAR), 5 (ETF/Fund), 9 (B-Share)
+          if (sym.startsWith('6') || sym.startsWith('5') || sym.startsWith('9')) {
              fullCode = 'sh' + sym;
-          } else if (sym.startsWith('0') || sym.startsWith('3')) {
+          } 
+          // SZ: 0 (Main), 3 (ChiNext), 1 (ETF/Fund), 2 (B-Share)
+          else if (sym.startsWith('0') || sym.startsWith('3') || sym.startsWith('1') || sym.startsWith('2')) {
              fullCode = 'sz' + sym;
-          } else if (sym.startsWith('4') || sym.startsWith('8')) {
+          } 
+          // BJ: 4, 8
+          else if (sym.startsWith('4') || sym.startsWith('8')) {
              fullCode = 'bj' + sym; 
           } else {
              // Fallback default to sh if unknown
