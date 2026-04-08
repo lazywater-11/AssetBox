@@ -284,12 +284,19 @@ const App: React.FC = () => {
     }
     history.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    setState(prev => ({
-       ...prev,
-       assets: updatedAssets,
-       brokerageAccounts: updatedBrokerages,
-       history
-    }));
+    setState(prev => {
+      // Merge price updates into the CURRENT state assets.
+      // This prevents a race condition where async price fetches started before
+      // a user add/delete would overwrite those changes when they complete.
+      const priceMap = new Map(updatedAssets.map(a => [a.id, a]));
+      const mergedAssets = prev.assets.map(a => priceMap.get(a.id) ?? a);
+      return {
+        ...prev,
+        assets: mergedAssets,
+        brokerageAccounts: updatedBrokerages,
+        history
+      };
+    });
 
     setPriceLoading(false);
   };
