@@ -4,6 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Asset Box - Asset Manager</title>
+
+    <!-- PWA -->
+    <meta name="description" content="个人多资产追踪与净值管理工具" />
+    <meta name="theme-color" content="#0e0e0f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AssetBox" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -49,6 +59,10 @@
       ::-webkit-scrollbar-thumb:hover {
         background: #3e4145;
       }
+      /* Prevent iOS input zoom */
+      input, select, textarea {
+        font-size: 16px;
+      }
     </style>
   <script type="importmap">
 {
@@ -67,5 +81,12 @@
   <body>
     <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js');
+      });
+    }
+  </script>
 </body>
 </html>
