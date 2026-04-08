@@ -31,6 +31,11 @@ const App: React.FC = () => {
   // Mobile sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Guard: only allow auto-save AFTER the initial Firebase data has been loaded.
+  // Without this, the auto-save effect can fire with empty INITIAL_STATE the moment
+  // the user object is set (before loadRemoteState completes), wiping Firebase data.
+  const [saveEnabled, setSaveEnabled] = useState(false);
+
   // Use refs to track state for closures
   const stateRef = useRef(state);
   const userRef = useRef<User | null>(null);
@@ -48,6 +53,7 @@ const App: React.FC = () => {
         const remoteData = await loadRemoteState(currentUser.uid);
         setState(remoteData);
         setDataLoading(false);
+        setSaveEnabled(true);   // safe to auto-save from now on
         // Trigger price refresh after data load
         refreshData(remoteData.assets, remoteData);
       } else {
@@ -63,12 +69,12 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. Auto-Save to Firebase (Debounced or on state change)
+  // 2. Auto-Save to Firebase — only runs after initial load completes (saveEnabled guard)
   useEffect(() => {
-    if (user && !dataLoading) {
+    if (user && saveEnabled) {
       saveRemoteState(user.uid, state);
     }
-  }, [state, user, dataLoading]);
+  }, [state, user, saveEnabled]);
 
   // 3. Price Refresh Interval
   useEffect(() => {
@@ -118,6 +124,7 @@ const App: React.FC = () => {
       const guestData = await loadRemoteState('guest');
       setState(guestData);
       setDataLoading(false);
+      setSaveEnabled(true);
       refreshData(guestData.assets, guestData);
   };
 
