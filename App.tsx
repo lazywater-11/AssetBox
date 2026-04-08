@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
+import BottomNav from './components/BottomNav';
 import Dashboard from './components/Dashboard';
 import Portfolio from './components/Portfolio';
 import Journal from './components/Journal';
@@ -26,13 +28,16 @@ const App: React.FC = () => {
   const [exchangeRates, setExchangeRates] = useState({ USD: 7.2, HKD: DEFAULT_HKD_CNY_RATE, CNY: 1 });
   const [priceLoading, setPriceLoading] = useState(false);
 
+  // Mobile sidebar state
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   // Use refs to track state for closures
   const stateRef = useRef(state);
   const userRef = useRef<User | null>(null);
 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { userRef.current = user; }, [user]);
-  
+
   // 1. Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -68,7 +73,7 @@ const App: React.FC = () => {
   // 3. Price Refresh Interval
   useEffect(() => {
     if (!user) return;
-    
+
     const interval = setInterval(() => {
       refreshData(stateRef.current.assets, stateRef.current);
     }, 5 * 60 * 1000);
@@ -135,12 +140,12 @@ const App: React.FC = () => {
     if (targetAssets.length === 0 && currentState.assets.length === 0) return;
 
     setPriceLoading(true);
-    
+
     // 1. Get Exchange Rate
     const ratesData = await fetchExchangeRates();
     const usdToCny = ratesData.USD;
-    const hkdToCny = DEFAULT_HKD_CNY_RATE; 
-    
+    const hkdToCny = DEFAULT_HKD_CNY_RATE;
+
     const newRates = { USD: usdToCny, HKD: hkdToCny, CNY: 1 };
     setExchangeRates(newRates);
 
@@ -172,14 +177,14 @@ const App: React.FC = () => {
       if (asset.type === AssetType.STOCK || asset.type === AssetType.CRYPTO) {
          if (price && asset.quantity) {
             let exchangeMult = 1;
-            
+
             if (currentState.baseCurrency === Currency.CNY) {
                if (asset.type === AssetType.CRYPTO) {
                  exchangeMult = usdToCny;
                } else if (asset.market === Market.US) {
                  exchangeMult = usdToCny;
                } else if (asset.market === Market.HK) {
-                 exchangeMult = hkdToCny; 
+                 exchangeMult = hkdToCny;
                } else if (asset.market === Market.CN) {
                  exchangeMult = 1;
                }
@@ -187,9 +192,9 @@ const App: React.FC = () => {
                if (asset.market === Market.CN) exchangeMult = 1/usdToCny;
                else if (asset.market === Market.HK) exchangeMult = hkdToCny/usdToCny;
             }
-            
+
             currentValue = price * asset.quantity * exchangeMult;
-            
+
             if (dailyChangePct !== undefined) {
                const prevVal = currentValue / (1 + (dailyChangePct / 100));
                dailyChangeVal = currentValue - prevVal;
@@ -202,10 +207,6 @@ const App: React.FC = () => {
       } else {
          // Manual Assets & Lent Money
          currentValue = asset.manualValue || 0;
-         // If Lent Money is in a different currency (e.g. USD), convert it to Base (CNY)
-         // Assuming manualValue is stored in `asset.currency`
-         // Simplified: In this app, manual value is often treated as base value for simplicity unless we enhance it.
-         // Let's enhance it slightly:
          if (asset.currency !== currentState.baseCurrency) {
              if (currentState.baseCurrency === Currency.CNY && asset.currency === Currency.USD) currentValue = currentValue * usdToCny;
              if (currentState.baseCurrency === Currency.CNY && asset.currency === Currency.HKD) currentValue = currentValue * hkdToCny;
@@ -227,9 +228,9 @@ const App: React.FC = () => {
     // 4. Update Brokerage Account Totals
     const updatedBrokerages = currentState.brokerageAccounts.map(account => {
         const accountAssets = updatedAssets.filter(a => a.brokerageAccountId === account.id);
-        
+
         let stocksValueNative = 0;
-        
+
         accountAssets.forEach(asset => {
            if (asset.currentPrice && asset.quantity) {
               stocksValueNative += asset.currentPrice * asset.quantity;
@@ -246,7 +247,7 @@ const App: React.FC = () => {
 
     // 5. Calculate Total Net Worth for History
     const totalAssetsVal = updatedAssets.reduce((sum, a) => sum + (a.currentValue || 0), 0);
-    
+
     let totalBrokerageCashBase = 0;
     updatedBrokerages.forEach(b => {
         let cashVal = 0;
@@ -275,7 +276,7 @@ const App: React.FC = () => {
     const todayStr = new Date().toISOString().split('T')[0];
     const history = [...(currentState.history || [])];
     const existingIndex = history.findIndex(h => h.date === todayStr);
-    
+
     if (existingIndex >= 0) {
         history[existingIndex] = { date: todayStr, value: currentNetWorth };
     } else {
@@ -283,13 +284,13 @@ const App: React.FC = () => {
     }
     history.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    setState(prev => ({ 
-       ...prev, 
+    setState(prev => ({
+       ...prev,
        assets: updatedAssets,
        brokerageAccounts: updatedBrokerages,
        history
     }));
-    
+
     setPriceLoading(false);
   };
 
@@ -321,13 +322,11 @@ const App: React.FC = () => {
        const asset = prev.assets.find(a => a.id === id);
        if (!asset) return prev;
 
-       // Create History Record
        const quantity = asset.quantity || 0;
        const costBasis = asset.costBasis || 0;
        const realizedPnL = (exitPrice - costBasis) * quantity;
-       const exitTotalValue = exitPrice * quantity; // Native
-       
-       // Rough estimation of Base value, uses current exchange rate from state (may vary slightly from reality but sufficient for history)
+       const exitTotalValue = exitPrice * quantity;
+
        let exitTotalValueBase = exitTotalValue;
        if (asset.market === Market.US && prev.baseCurrency === Currency.CNY) exitTotalValueBase *= exchangeRates.USD;
        else if (asset.market === Market.HK && prev.baseCurrency === Currency.CNY) exitTotalValueBase *= exchangeRates.HKD;
@@ -356,14 +355,9 @@ const App: React.FC = () => {
           clearedAssets: [clearedItem, ...(prev.clearedAssets || [])]
        };
 
-       // Also need to Update Brokerage Cash Balance!
-       // When you sell, cash increases.
        if (asset.brokerageAccountId) {
            const brokerage = prev.brokerageAccounts.find(b => b.id === asset.brokerageAccountId);
            if (brokerage) {
-               // Assuming exitPrice is in the brokerage's currency for simplicity in this MVP
-               // Ideally, we check asset.market currency vs brokerage currency. 
-               // Assuming standard matching (US stock in USD account).
                const updatedBrokerage = {
                    ...brokerage,
                    availableCash: (brokerage.availableCash || 0) + exitTotalValue
@@ -397,15 +391,14 @@ const App: React.FC = () => {
     setState(prev => {
         const updated = prev.brokerageAccounts.map(b => b.id === account.id ? account : b);
         const newState = { ...prev, brokerageAccounts: updated };
-        // Recalc totals immediately
         setTimeout(() => refreshData(newState.assets, newState), 0);
         return newState;
     });
   };
 
   const removeBrokerage = (id: string) => {
-    setState(prev => ({ 
-      ...prev, 
+    setState(prev => ({
+      ...prev,
       brokerageAccounts: prev.brokerageAccounts.filter(b => b.id !== id),
       assets: prev.assets.filter(a => a.brokerageAccountId !== id)
     }));
@@ -441,52 +434,72 @@ const App: React.FC = () => {
 
   return (
     <div className="flex min-h-screen bg-brand-dark text-white font-sans selection:bg-brand-green selection:text-black">
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
         userEmail={user.email}
         onLogout={handleLogout}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
-      
-      <main className="ml-64 flex-1 p-8 overflow-x-hidden">
-        <header className="flex justify-between items-center mb-8">
-          <div>
-            <h2 className="text-2xl font-bold capitalize">{activeTab}</h2>
-            <p className="text-brand-muted text-sm mt-1">
-               {new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-            </p>
+
+      <main className="md:ml-64 flex-1 p-4 md:p-8 overflow-x-hidden pb-20 md:pb-8">
+        <header className="flex justify-between items-center mb-6 md:mb-8">
+          <div className="flex items-center gap-3">
+            {/* Hamburger - mobile only */}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden p-2 rounded-lg bg-brand-card border border-white/10 min-h-[44px] min-w-[44px] flex items-center justify-center"
+              aria-label="Open menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold capitalize">{activeTab}</h2>
+              <p className="text-brand-muted text-xs md:text-sm mt-0.5 hidden sm:block">
+                 {new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-             {(priceLoading || dataLoading) && <span className="text-xs text-brand-green animate-pulse">Syncing data...</span>}
-             <div className="flex items-center gap-2 bg-brand-card px-3 py-1.5 rounded-lg border border-white/10">
-                <span className="text-xs text-brand-muted">USD/CNY</span>
-                <span className="font-mono font-bold text-sm">{exchangeRates.USD.toFixed(4)}</span>
+          <div className="flex items-center gap-2 md:gap-4">
+             {(priceLoading || dataLoading) && <span className="text-xs text-brand-green animate-pulse hidden sm:block">Syncing...</span>}
+             <div className="flex items-center gap-1 md:gap-2 bg-brand-card px-2 md:px-3 py-1.5 rounded-lg border border-white/10">
+                <span className="text-xs text-brand-muted hidden sm:block">USD/CNY</span>
+                <span className="font-mono font-bold text-xs md:text-sm">{exchangeRates.USD.toFixed(2)}</span>
              </div>
-             <div className="w-10 h-10 rounded-full bg-brand-card border border-white/10 flex items-center justify-center overflow-hidden">
+             <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-brand-card border border-white/10 flex items-center justify-center overflow-hidden">
                 {user.photoURL ? (
                     <img src={user.photoURL} alt="User" className="w-full h-full object-cover" />
                 ) : (
-                    <span className="font-bold text-brand-green">{user.email?.charAt(0).toUpperCase()}</span>
+                    <span className="font-bold text-brand-green text-sm">{user.email?.charAt(0).toUpperCase()}</span>
                 )}
              </div>
           </div>
         </header>
 
         {activeTab === 'dashboard' && (
-          <Dashboard 
-            state={state} 
-            exchangeRate={exchangeRates.USD} 
+          <Dashboard
+            state={state}
+            exchangeRate={exchangeRates.USD}
             onNavigate={handleNavigate}
           />
         )}
-        
+
         {activeTab === 'portfolio' && (
-          <Portfolio 
-            state={state} 
+          <Portfolio
+            state={state}
             activeTab={activePortfolioTab}
             onTabChange={setActivePortfolioTab}
             onAddAsset={addAsset}
-            onUpdateAsset={updateAsset} 
+            onUpdateAsset={updateAsset}
             onRemoveAsset={removeAsset}
             onLiquidateAsset={liquidateAsset}
             onAddLiability={addLiability}
@@ -499,10 +512,10 @@ const App: React.FC = () => {
             exchangeRates={exchangeRates}
           />
         )}
-        
+
         {activeTab === 'journal' && (
-          <Journal 
-            entries={state.journal} 
+          <Journal
+            entries={state.journal}
             assets={state.assets}
             onAddEntry={addJournalEntry}
             onUpdateEntry={updateJournalEntry}
@@ -512,12 +525,12 @@ const App: React.FC = () => {
         {activeTab === 'settings' && (
            <div className="text-center py-20 text-brand-muted">
               <p>Settings module allows toggling Base Currency (CNY/USD) and setting custom exchange rate sources.</p>
-              <button 
+              <button
                  onClick={() => {
                     const next = state.baseCurrency === Currency.CNY ? Currency.USD : Currency.CNY;
                     setState(p => ({...p, baseCurrency: next}));
                  }}
-                 className="mt-4 px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white"
+                 className="mt-4 px-4 py-2 bg-white/10 hover:bg-white/20 rounded text-white min-h-[44px]"
               >
                  Switch Base Currency to {state.baseCurrency === Currency.CNY ? 'USD' : 'CNY'}
               </button>
@@ -528,6 +541,9 @@ const App: React.FC = () => {
            </div>
         )}
       </main>
+
+      {/* Bottom navigation - mobile only */}
+      <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
     </div>
   );
 };
