@@ -47,6 +47,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
+        // Firebase fires onAuthStateChanged multiple times (token refresh, reconnect, etc.).
+        // If the same user is already loaded, skip re-loading to prevent overwriting
+        // in-memory state (and subsequently writing stale data back to Firebase).
+        if (userRef.current?.uid === currentUser.uid) {
+          setAuthLoading(false);
+          return;
+        }
         setUser(currentUser);
         // Load data from Firebase
         setDataLoading(true);
