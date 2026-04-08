@@ -1,7 +1,5 @@
 <div align="center">
 
-<img width="1200" height="475" alt="AssetBox Banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-
 <h1>💰 AssetBox</h1>
 
 <p>个人多资产追踪与净值管理工具，支持 A股 / 美股 / 港股 / 加密货币，实时汇率换算，一站式掌握你的财富全貌。</p>
@@ -13,6 +11,20 @@
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 [在线体验 →](https://asset-box-six.vercel.app) · [报告问题](https://github.com/lazywater-11/AssetBox/issues) · [提交建议](https://github.com/lazywater-11/AssetBox/issues)
+
+</div>
+
+---
+
+## 📸 界面截图
+
+<div align="center">
+
+**Dashboard — 总资产净值趋势**
+![Dashboard](https://raw.githubusercontent.com/lazywater-11/AssetBox/main/docs/screenshot-dashboard.png)
+
+**Portfolio — 持仓明细管理**
+![Portfolio](https://raw.githubusercontent.com/lazywater-11/AssetBox/main/docs/screenshot-portfolio.png)
 
 </div>
 
