@@ -50,7 +50,7 @@ const App: React.FC = () => {
         // Firebase fires onAuthStateChanged multiple times (token refresh, reconnect, etc.).
         // If the same user is already loaded, skip re-loading to prevent overwriting
         // in-memory state (and subsequently writing stale data back to Firebase).
-        if (userRef.current?.uid === currentUser.uid) {
+        if (userRef.current?.uid === currentUser.uid && saveEnabled) {
           setAuthLoading(false);
           return;
         }
@@ -299,16 +299,35 @@ const App: React.FC = () => {
     history.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     setState(prev => {
-      // Merge price updates into the CURRENT state assets.
-      // This prevents a race condition where async price fetches started before
-      // a user add/delete would overwrite those changes when they complete.
+      // Merge into CURRENT state (prev), not the stale snapshot passed to refreshData.
+      // This prevents any concurrent user edits from being overwritten.
+
+      // assets: only update price fields
       const priceMap = new Map(updatedAssets.map(a => [a.id, a]));
       const mergedAssets = prev.assets.map(a => priceMap.get(a.id) ?? a);
+
+      // brokerageAccounts: only update computed totalValue, keep user-edited fields
+      const brokerageTotalMap = new Map(updatedBrokerages.map(b => [b.id, b.totalValue]));
+      const mergedBrokerages = prev.brokerageAccounts.map(b => ({
+        ...b,
+        totalValue: brokerageTotalMap.get(b.id) ?? b.totalValue
+      }));
+
+      // history: upsert today's entry into prev.history
+      const mergedHistory = [...(prev.history ?? [])];
+      const idx = mergedHistory.findIndex(h => h.date === todayStr);
+      if (idx >= 0) {
+        mergedHistory[idx] = { date: todayStr, value: currentNetWorth };
+      } else {
+        mergedHistory.push({ date: todayStr, value: currentNetWorth });
+      }
+      mergedHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
       return {
         ...prev,
         assets: mergedAssets,
-        brokerageAccounts: updatedBrokerages,
-        history
+        brokerageAccounts: mergedBrokerages,
+        history: mergedHistory
       };
     });
 
