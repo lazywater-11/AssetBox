@@ -16,7 +16,7 @@
 
 ---
 
-## 📸 界面截图
+## 界面截图
 
 <div align="center">
 
@@ -40,7 +40,6 @@
 | 📓 **投资决策日志** | 记录每笔买卖的决策逻辑，复盘自己的交易思路 |
 | 💸 **已实现盈亏追踪** | 清仓记录与累计收益统计，算清真实投资回报 |
 | ☁️ **多端云同步** | Firebase 实时同步，手机 / 电脑数据随时一致 |
-| 🔐 **Google 一键登录** | OAuth 鉴权，也支持 Guest 模式免登录体验 |
 
 ---
 
@@ -51,15 +50,6 @@
 > 使用 Guest 模式可免登录查看完整功能演示，数据不会被保存。
 
 ---
-
-## 🛠️ 技术栈
-
-```
-前端       React 18 + TypeScript 5 + Vite 6
-UI 组件    Lucide React（图标）· Recharts（图表）
-后端服务   Firebase Authentication · Firestore · Cloud Storage
-部署       Vercel（自动 CI/CD）
-```
 
 ---
 
