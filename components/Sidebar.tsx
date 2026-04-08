@@ -7,9 +7,11 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
   userEmail: string | null;
   onLogout: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userEmail, onLogout }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userEmail, onLogout, isOpen = false, onClose }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: ICONS.Dashboard },
     { id: 'portfolio', label: 'Portfolio', icon: ICONS.Portfolio },
@@ -17,8 +19,16 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userEmail, o
     { id: 'settings', label: 'Settings', icon: ICONS.Settings },
   ];
 
+  const handleItemClick = (id: string) => {
+    setActiveTab(id);
+    onClose?.();
+  };
+
   return (
-    <aside className="w-64 h-screen bg-brand-dark border-r border-white/5 flex flex-col fixed left-0 top-0 z-50">
+    <aside
+      className={`w-64 h-screen bg-brand-dark border-r border-white/5 flex flex-col fixed left-0 top-0 z-50 transition-transform duration-300
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
+    >
       <div className="p-8 flex items-center gap-3">
         <div className="w-8 h-8 rounded-full bg-brand-green flex items-center justify-center">
           <ICONS.Bank className="text-black w-5 h-5" />
@@ -32,10 +42,10 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userEmail, o
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => handleItemClick(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
-                isActive 
-                  ? 'bg-brand-card text-brand-green font-medium shadow-lg shadow-black/20' 
+                isActive
+                  ? 'bg-brand-card text-brand-green font-medium shadow-lg shadow-black/20'
                   : 'text-brand-muted hover:text-white hover:bg-white/5'
               }`}
             >
@@ -53,7 +63,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userEmail, o
              <div className="text-sm text-white font-medium truncate" title={userEmail}>{userEmail}</div>
            </div>
         )}
-        <button 
+        <button
           onClick={onLogout}
           className="w-full py-3 px-4 font-bold rounded-full flex items-center justify-center gap-2 transition-colors bg-brand-card text-brand-red hover:bg-white/5 border border-white/10"
         >
