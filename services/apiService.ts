@@ -1,5 +1,42 @@
-import { Asset, AssetType, Market, PriceData } from '../types';
+import { Asset, AssetType, LLMConfig, Market, ParsedStockItem, PriceData } from '../types';
 import { DEFAULT_USD_CNY_RATE } from '../constants';
+import { callLLMVision } from './llmService';
+
+// Search stock code by name via Tencent SmartBox API (sequential to avoid JSONP var collision)
+export const searchStockCodeByName = (name: string): Promise<string | null> => {
+  return new Promise((resolve) => {
+    const varName = 'v_s_v2';
+    delete (window as any)[varName];
+
+    const script = document.createElement('script');
+    script.src = `https://smartbox.gtimg.cn/s3/?v=2&q=${encodeURIComponent(name)}&type=N&from=S&t=${Date.now()}`;
+
+    const cleanup = () => { try { document.body.removeChild(script); } catch {} };
+
+    script.onload = () => {
+      const raw = (window as any)[varName] as string | undefined;
+      cleanup();
+      if (!raw) { resolve(null); return; }
+
+      // First result (multiple results separated by '^'), fields separated by '~'
+      // Format: type~name~code~price~...  e.g. "11~比亚迪~sz002594~..."
+      const parts = raw.split('^')[0].split('~');
+      const rawCode = parts[2];
+      if (!rawCode) { resolve(null); return; }
+
+      // Strip exchange prefix: sh/sz/bj/hk → digits, us → uppercase
+      const m = rawCode.match(/^(sh|sz|bj|hk|us)(.+)$/i);
+      if (m) {
+        resolve(m[1].toLowerCase() === 'us' ? m[2].toUpperCase() : m[2]);
+      } else {
+        resolve(rawCode);
+      }
+    };
+
+    script.onerror = () => { cleanup(); resolve(null); };
+    document.body.appendChild(script);
+  });
+};
 
 // Helper for JSONP requests (Tencent Finance)
 const jsonp = (url: string, callbackName: string): Promise<any> => {
@@ -136,6 +173,38 @@ export const fetchCryptoPrices = async (assets: Asset[]): Promise<Record<string,
     console.error("Failed to fetch crypto prices", error);
     return {};
   }
+};
+
+export const parseStockScreenshot = async (
+  imageBase64: string,
+  mimeType: string,
+  llmConfig: LLMConfig,
+): Promise<ParsedStockItem[]> => {
+  const prompt = `你是一个金融数据提取工具。请从这张券商持仓截图中提取所有持仓股票，返回严格的 JSON 数组，不要包含任何其他文字或 markdown 格式。
+
+JSON 格式：
+[
+  {
+    "name": "股票名称（从截图读取）",
+    "symbol": "股票代码（仅从截图中直接读取，如截图未显示代码则填 null，绝对不要推断或猜测）",
+    "symbolConfirmed": true或false（截图中有明确显示代码填true，没有显示代码填false）,
+    "quantity": 持仓数量（整数，从"持仓/可用"列读取，找不到填null）,
+    "costPrice": 成本价（数字，从"成本/现价"的成本列读取，找不到填null）,
+    "currentPrice": 现价（数字，从"成本/现价"的现价列读取，找不到填null）,
+    "market": "cn或hk或us（A股=cn，港股=hk，美股=us，ETF跟随其挂牌市场）"
+  }
+]
+
+重要规则：symbol 字段只填截图中肉眼可见的代码，绝对不能根据股票名称推断代码。只返回 JSON 数组，无其他任何内容。如果图片不是券商持仓截图，返回空数组 []。`;
+
+  const text = (await callLLMVision(llmConfig, prompt, imageBase64, mimeType)).trim()
+    .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  const items = JSON.parse(text) as Omit<ParsedStockItem, 'selected'>[];
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('未识别到持仓信息，请重新上传清晰的券商截图');
+  }
+  return items.map(item => ({ ...item, selected: true }));
 };
 
 export const fetchExchangeRates = async (): Promise<{ USD: number }> => {

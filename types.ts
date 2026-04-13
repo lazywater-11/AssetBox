@@ -107,6 +107,12 @@ export interface HistoryPoint {
   value: number;
 }
 
+export interface LLMConfig {
+  provider: string; // 'openai' | 'gemini' | 'glm' | 'minimax' | 'deepseek' | 'qwen'
+  model: string;
+  apiKey: string;
+}
+
 export interface AppState {
   baseCurrency: Currency;
   brokerageAccounts: BrokerageAccount[];
@@ -115,10 +121,22 @@ export interface AppState {
   liabilities: Liability[];
   journal: JournalEntry[];
   history: HistoryPoint[];
+  llmConfig?: LLMConfig;
 }
 
 export interface PriceData {
   price: number;
   changePct: number;
   name?: string;
+}
+
+export interface ParsedStockItem {
+  name: string;
+  symbol: string | null;
+  quantity: number | null;
+  costPrice: number | null;
+  currentPrice: number | null;
+  market: 'cn' | 'hk' | 'us';
+  selected: boolean;
+  symbolConfirmed?: boolean; // true = code visually present in screenshot
 }

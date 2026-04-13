@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { AppState, Asset, AssetType, Currency, Market, Liability, LiabilityType, BrokerageAccount } from '../types';
-import { Plus, Trash2, Wallet, Edit2, Coins, Banknote, Building, CreditCard, AlertTriangle, Handshake, Gavel, History } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { AppState, Asset, AssetType, Currency, LLMConfig, Market, Liability, LiabilityType, BrokerageAccount, ParsedStockItem } from '../types';
+import { Plus, Trash2, Wallet, Edit2, Coins, Banknote, Building, CreditCard, AlertTriangle, Handshake, Gavel, History, Camera, Loader2, Bot, X } from 'lucide-react';
+import { parseStockScreenshot, searchStockCodeByName } from '../services/apiService';
+import { callLLMText } from '../services/llmService';
 
 interface PortfolioProps {
   state: AppState;
@@ -18,24 +20,26 @@ interface PortfolioProps {
   onRemoveBrokerage: (id: string) => void;
   refreshPrices: () => void;
   exchangeRates: { USD: number; HKD: number; CNY: number };
+  llmConfig?: LLMConfig;
 }
 
-const Portfolio: React.FC<PortfolioProps> = ({ 
-  state, 
+const Portfolio: React.FC<PortfolioProps> = ({
+  state,
   activeTab,
   onTabChange,
-  onAddAsset, 
+  onAddAsset,
   onUpdateAsset,
   onRemoveAsset,
   onLiquidateAsset,
-  onAddLiability, 
+  onAddLiability,
   onUpdateLiability,
-  onRemoveLiability, 
-  onAddBrokerage, 
+  onRemoveLiability,
+  onAddBrokerage,
   onUpdateBrokerage,
-  onRemoveBrokerage, 
+  onRemoveBrokerage,
   refreshPrices,
-  exchangeRates
+  exchangeRates,
+  llmConfig,
 }) => {
   
   // Modal State
@@ -71,6 +75,22 @@ const Portfolio: React.FC<PortfolioProps> = ({
   const [formExitDate, setFormExitDate] = useState('');
   const [formExitReason, setFormExitReason] = useState('');
 
+  // Screenshot import state
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false);
+  const [screenshotBrokerageId, setScreenshotBrokerageId] = useState('');
+  const [screenshotParsing, setScreenshotParsing] = useState(false);
+  const [screenshotError, setScreenshotError] = useState('');
+  const [parsedItems, setParsedItems] = useState<ParsedStockItem[]>([]);
+  const [screenshotInputKey, setScreenshotInputKey] = useState(0);
+
+  // AI analysis state
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState('');
+  const [analysisAccountName, setAnalysisAccountName] = useState('');
+  const [analysisAccountId, setAnalysisAccountId] = useState('');
+  const [showAnalysisDrawer, setShowAnalysisDrawer] = useState(false);
+  const [analysisCache, setAnalysisCache] = useState<Record<string, string>>({});
+
   const resetForm = () => {
     setFormName('');
     setFormSymbol('');
@@ -90,6 +110,168 @@ const Portfolio: React.FC<PortfolioProps> = ({
     setSelectedBrokerageId('');
     setEditingBrokerageId(null);
     setEditingAssetId(null);
+  };
+
+  // --- Screenshot Import ---
+
+  const handleScreenshotUpload = async (e: React.ChangeEvent<HTMLInputElement>, brokerageId: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!llmConfig?.apiKey) {
+      alert('请先在设置页面配置 LLM 模型和 API Key');
+      return;
+    }
+
+    setScreenshotInputKey(k => k + 1);
+    setScreenshotBrokerageId(brokerageId);
+    setScreenshotParsing(true);
+    setScreenshotError('');
+    setParsedItems([]);
+    setShowScreenshotModal(true);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = (reader.result as string).split(',')[1];
+      try {
+        const items = await parseStockScreenshot(base64, file.type, llmConfig);
+
+        // Auto-search codes for items not confirmed from screenshot (sequential to avoid JSONP collision)
+        const enriched = [...items];
+        for (let i = 0; i < enriched.length; i++) {
+          if (!enriched[i].symbolConfirmed || !enriched[i].symbol) {
+            const found = await searchStockCodeByName(enriched[i].name);
+            if (found) {
+              enriched[i] = { ...enriched[i], symbol: found };
+              // symbolConfirmed stays false → shows '搜' badge in table
+            }
+          }
+        }
+
+        setParsedItems(enriched);
+      } catch (err) {
+        setScreenshotError(err instanceof Error ? err.message : '识别失败，请检查截图或手动录入');
+      } finally {
+        setScreenshotParsing(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const updateParsedItem = (index: number, field: keyof ParsedStockItem, value: string | number | boolean | null) => {
+    setParsedItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  };
+
+  const handleConfirmImport = () => {
+    const brokerage = state.brokerageAccounts.find(b => b.id === screenshotBrokerageId);
+    if (!brokerage) return;
+
+    const marketCurrencyMap: Record<string, Currency> = {
+      cn: Currency.CNY,
+      hk: Currency.HKD,
+      us: Currency.USD,
+    };
+
+    parsedItems
+      .filter(item => item.selected && item.symbol?.trim())
+      .forEach(item => {
+        const market = item.market as Market;
+        const currency = marketCurrencyMap[item.market] || brokerage.currency;
+        const cleanSymbol = item.symbol.trim().toUpperCase();
+
+        // Upsert: if same symbol already exists in this brokerage account, overwrite it
+        const existing = state.assets.find(
+          a => a.brokerageAccountId === screenshotBrokerageId && a.symbol === cleanSymbol
+        );
+
+        if (existing) {
+          onUpdateAsset({
+            ...existing,
+            name: item.name || cleanSymbol,
+            currency,
+            symbol: cleanSymbol,
+            quantity: item.quantity ?? existing.quantity,
+            costBasis: item.costPrice ?? existing.costBasis,
+            market,
+          });
+        } else {
+          onAddAsset({
+            id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+            name: item.name || cleanSymbol,
+            type: AssetType.STOCK,
+            currency,
+            symbol: cleanSymbol,
+            quantity: item.quantity || 0,
+            costBasis: item.costPrice || 0,
+            market,
+            brokerageAccountId: screenshotBrokerageId,
+          });
+        }
+      });
+
+    setShowScreenshotModal(false);
+    setParsedItems([]);
+  };
+
+  // --- AI Analysis ---
+
+  const handleAnalyzeAccount = async (account: BrokerageAccount, forceRefresh = false) => {
+    if (!llmConfig?.apiKey) {
+      alert('请先在设置页面配置 LLM 模型和 API Key');
+      return;
+    }
+
+    const accountAssets = state.assets.filter(a => a.brokerageAccountId === account.id);
+    if (accountAssets.length === 0) {
+      alert('该账户暂无持仓，无法分析');
+      return;
+    }
+
+    setAnalysisAccountName(account.name);
+    setAnalysisAccountId(account.id);
+    setShowAnalysisDrawer(true);
+
+    // Return cached result unless user explicitly requests a refresh
+    if (!forceRefresh && analysisCache[account.id]) {
+      setAnalysisResult(analysisCache[account.id]);
+      return;
+    }
+
+    setAnalysisResult('');
+    setAnalysisLoading(true);
+
+    const rows = accountAssets.map(a => {
+      const nativeValue = ((a.currentPrice || 0) * (a.quantity || 0)).toFixed(2);
+      const pnl = a.totalReturnPct !== undefined ? `${a.totalReturnPct.toFixed(2)}%` : 'N/A';
+      return `| ${a.symbol} | ${a.name} | ${a.quantity} | ${a.costBasis?.toFixed(2) ?? 'N/A'} | ${a.currentPrice?.toFixed(2) ?? 'N/A'} | ${nativeValue} | ${pnl} |`;
+    }).join('\n');
+
+    const prompt = `你是一位专业的投资顾问。以下是用户在"${account.name}"证券账户中的当前持仓数据：
+
+| 代码 | 名称 | 数量 | 成本价 | 现价 | 市值(${account.currency}) | 总收益率 |
+|------|------|------|--------|------|--------------------------|---------|
+${rows}
+
+请从以下两个维度进行简明分析：
+
+**1. 仓位健康度**
+- 评估持仓的集中度（是否有单只股票占比过高的风险）
+- 评估行业/市场分散度
+
+**2. 个股建议**
+- 针对每只持仓股票，结合其盈亏情况，给出简短的操作建议（如：继续持有、逢高减仓、关注风险等）
+
+请用中文回答，格式清晰，语言简洁专业。`;
+
+    try {
+      const result = await callLLMText(llmConfig, prompt);
+      setAnalysisResult(result);
+      setAnalysisCache(prev => ({ ...prev, [account.id]: result }));
+    } catch (err) {
+      setAnalysisResult(`分析失败：${err instanceof Error ? err.message : '未知错误'}`);
+    } finally {
+      setAnalysisLoading(false);
+    }
   };
 
   // --- Actions ---
@@ -380,6 +562,148 @@ const Portfolio: React.FC<PortfolioProps> = ({
       return rateFrom / rateTo;
   }
 
+  // --- Lightweight Markdown Renderer ---
+  const renderInline = (text: string): React.ReactNode[] => {
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} className="text-white font-semibold">{part.slice(2, -2)}</strong>;
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
+
+  const renderMarkdown = (raw: string): React.ReactNode => {
+    const lines = raw.split('\n');
+    const nodes: React.ReactNode[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (!trimmed || trimmed === '---') {
+        i++;
+        continue;
+      }
+
+      // H2 / H3 heading → section card header
+      if (trimmed.startsWith('### ') || trimmed.startsWith('## ')) {
+        const level = trimmed.startsWith('## ') ? 2 : 3;
+        const text = trimmed.replace(/^#{2,3} /, '');
+        nodes.push(
+          <div key={i} className={`flex items-center gap-2 mt-6 mb-3 ${level === 2 ? 'mt-2' : ''}`}>
+            <div className="w-1 h-5 rounded-full bg-brand-green shrink-0" />
+            <span className="text-sm font-bold text-brand-green tracking-wide uppercase">{text}</span>
+          </div>
+        );
+        i++;
+        continue;
+      }
+
+      // H4 heading → sub-section
+      if (trimmed.startsWith('#### ')) {
+        const text = trimmed.replace(/^#### /, '');
+        nodes.push(
+          <p key={i} className="text-white font-semibold text-sm mt-4 mb-1">{renderInline(text)}</p>
+        );
+        i++;
+        continue;
+      }
+
+      // Markdown table: collect consecutive lines starting with |
+      if (trimmed.startsWith('|')) {
+        const tableLines: string[] = [];
+        while (i < lines.length && lines[i].trim().startsWith('|')) {
+          tableLines.push(lines[i].trim());
+          i++;
+        }
+        // Parse header, skip separator, parse rows
+        const parseRow = (line: string) =>
+          line.split('|').map(c => c.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1);
+
+        const headerCells = parseRow(tableLines[0] || '');
+        const dataRows = tableLines
+          .slice(1)
+          .filter(l => !/^\|[-:| ]+\|$/.test(l))
+          .map(parseRow);
+
+        nodes.push(
+          <div key={`table-${i}`} className="my-3 overflow-x-auto rounded-lg border border-white/[0.07]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-brand-green/5 border-b border-white/[0.07]">
+                  {headerCells.map((cell, ci) => (
+                    <th key={ci} className="p-2 text-left text-brand-green/80 font-semibold uppercase tracking-wide whitespace-nowrap">{renderInline(cell)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.05]">
+                {dataRows.map((row, ri) => (
+                  <tr key={ri} className="hover:bg-white/[0.03]">
+                    {row.map((cell, ci) => (
+                      <td key={ci} className="p-2 text-white/70 whitespace-nowrap">{renderInline(cell)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        continue;
+      }
+
+      // Collect consecutive list items (- or *)
+      if (trimmed.match(/^[-*] /)) {
+        const items: string[] = [];
+        while (i < lines.length && lines[i].trim().match(/^[-*] /)) {
+          items.push(lines[i].trim().replace(/^[-*] /, ''));
+          i++;
+        }
+        nodes.push(
+          <ul key={`ul-${i}`} className="space-y-1.5 my-2">
+            {items.map((item, idx) => (
+              <li key={idx} className="flex items-start gap-2.5 text-sm text-white/75 leading-relaxed">
+                <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-green/60 shrink-0" />
+                <span>{renderInline(item)}</span>
+              </li>
+            ))}
+          </ul>
+        );
+        continue;
+      }
+
+      // Collect consecutive numbered list items
+      if (trimmed.match(/^\d+\. /)) {
+        const items: string[] = [];
+        let idx = 1;
+        while (i < lines.length && lines[i].trim().match(/^\d+\. /)) {
+          items.push(lines[i].trim().replace(/^\d+\. /, ''));
+          i++;
+        }
+        nodes.push(
+          <ol key={`ol-${i}`} className="space-y-1.5 my-2">
+            {items.map((item, n) => (
+              <li key={n} className="flex items-start gap-2.5 text-sm text-white/75 leading-relaxed">
+                <span className="mt-0.5 min-w-[20px] h-5 rounded bg-brand-green/15 text-brand-green text-xs font-mono font-bold flex items-center justify-center shrink-0">{idx++}</span>
+                <span>{renderInline(item)}</span>
+              </li>
+            ))}
+          </ol>
+        );
+        continue;
+      }
+
+      // Regular paragraph
+      nodes.push(
+        <p key={i} className="text-sm text-white/70 leading-relaxed my-1.5">{renderInline(trimmed)}</p>
+      );
+      i++;
+    }
+
+    return <div className="space-y-0.5">{nodes}</div>;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -475,9 +799,19 @@ const Portfolio: React.FC<PortfolioProps> = ({
                            <span className="text-xs text-brand-muted">Securities Account • {account.currency}</span>
                         </div>
                      </div>
-                     <button onClick={() => onRemoveBrokerage(account.id)} className="text-red-500 hover:text-red-400 text-xs flex items-center gap-1">
-                        <Trash2 className="w-3 h-3" /> Delete Account
-                     </button>
+                     <div className="flex items-center gap-2">
+                       <button
+                         onClick={() => handleAnalyzeAccount(account)}
+                         disabled={analysisLoading}
+                         className="text-brand-green hover:text-[#00e004] text-xs flex items-center gap-1 disabled:opacity-50"
+                       >
+                         <Bot className="w-3 h-3" />
+                         {analysisLoading && analysisAccountName === account.name ? 'AI 分析中...' : 'AI 持仓分析'}
+                       </button>
+                       <button onClick={() => onRemoveBrokerage(account.id)} className="text-red-500 hover:text-red-400 text-xs flex items-center gap-1">
+                         <Trash2 className="w-3 h-3" /> Delete Account
+                       </button>
+                     </div>
                   </div>
                   
                   {/* Account Stats Grid */}
@@ -569,12 +903,24 @@ const Portfolio: React.FC<PortfolioProps> = ({
                         {/* Add Stock Row */}
                         <tr>
                           <td colSpan={7} className="p-2">
-                              <button 
+                            <div className="flex gap-2">
+                              <button
                                 onClick={() => openAddStock(account.id)}
-                                className="w-full py-2 flex items-center justify-center gap-2 text-sm text-brand-muted hover:text-brand-green hover:bg-white/5 rounded transition-colors dashed-border"
+                                className="flex-1 py-2 flex items-center justify-center gap-2 text-sm text-brand-muted hover:text-brand-green hover:bg-white/5 rounded transition-colors dashed-border"
                               >
-                                <Plus className="w-3 h-3" /> Add Stock to {account.name}
+                                <Plus className="w-3 h-3" /> Add Stock
                               </button>
+                              <label className="flex-1 py-2 flex items-center justify-center gap-2 text-sm text-brand-muted hover:text-brand-green hover:bg-white/5 rounded transition-colors dashed-border cursor-pointer">
+                                <Camera className="w-3 h-3" /> Import from Screenshot
+                                <input
+                                  key={screenshotInputKey}
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => handleScreenshotUpload(e, account.id)}
+                                />
+                              </label>
+                            </div>
                           </td>
                         </tr>
                     </tbody>
@@ -720,6 +1066,96 @@ const Portfolio: React.FC<PortfolioProps> = ({
                </tbody>
             </table>
          </div>
+      )}
+
+      {/* AI Analysis Drawer */}
+      {showAnalysisDrawer && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowAnalysisDrawer(false)} />
+          <div className="relative w-full max-w-[480px] bg-[#0f0f0f] border-l border-white/[0.07] flex flex-col shadow-2xl">
+            {/* Green accent bar at top */}
+            <div className="h-[3px] w-full bg-gradient-to-r from-brand-green via-brand-green/60 to-transparent" />
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-brand-green/10 border border-brand-green/20 flex items-center justify-center">
+                  <Bot className="w-4 h-4 text-brand-green" />
+                </div>
+                <div>
+                  <div className="text-xs text-brand-muted uppercase tracking-widest font-medium">AI 持仓分析</div>
+                  <div className="text-sm font-semibold text-white leading-tight">{analysisAccountName}</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAnalysisDrawer(false)}
+                className="w-7 h-7 rounded-md flex items-center justify-center text-white/30 hover:text-white hover:bg-white/[0.07] transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 scrollbar-thin">
+              {analysisLoading ? (
+                <div className="flex flex-col items-center justify-center h-full gap-5 py-20">
+                  {/* Pulsing ring animation */}
+                  <div className="relative w-14 h-14">
+                    <div className="absolute inset-0 rounded-full border-2 border-brand-green/20 animate-ping" />
+                    <div className="absolute inset-0 rounded-full border-2 border-brand-green/40" />
+                    <div className="absolute inset-2 rounded-full bg-brand-green/5 flex items-center justify-center">
+                      <Bot className="w-5 h-5 text-brand-green" />
+                    </div>
+                  </div>
+                  <div className="text-center space-y-1">
+                    <p className="text-sm text-white/80 font-medium">正在深度分析持仓数据</p>
+                    <p className="text-xs text-white/30">AI 正在评估仓位健康度与个股风险...</p>
+                  </div>
+                  {/* Animated dots */}
+                  <div className="flex gap-1.5">
+                    {[0, 1, 2].map(n => (
+                      <div
+                        key={n}
+                        className="w-1.5 h-1.5 rounded-full bg-brand-green/60"
+                        style={{ animation: `pulse 1.2s ease-in-out ${n * 0.2}s infinite` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  {/* Timestamp badge */}
+                  <div className="flex items-center gap-2 mb-5">
+                    <div className="flex-1 h-px bg-white/[0.06]" />
+                    <span className="text-[10px] text-white/25 font-mono uppercase tracking-wider">
+                      {new Date().toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <div className="flex-1 h-px bg-white/[0.06]" />
+                  </div>
+
+                  {/* Rendered markdown */}
+                  {renderMarkdown(analysisResult)}
+
+                  {/* Footer: disclaimer + re-analyze button */}
+                  <div className="mt-8 pt-4 border-t border-white/[0.05] space-y-3">
+                    <p className="text-[11px] text-white/20 leading-relaxed">
+                      以上分析由 AI 模型生成，仅供参考，不构成投资建议。投资有风险，决策需谨慎。
+                    </p>
+                    <button
+                      onClick={() => {
+                        const account = state.brokerageAccounts.find(b => b.id === analysisAccountId);
+                        if (account) handleAnalyzeAccount(account, true);
+                      }}
+                      className="flex items-center gap-1.5 text-xs text-white/30 hover:text-brand-green transition-colors"
+                    >
+                      <Bot className="w-3 h-3" /> 再次分析
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Unified Modal */}
@@ -889,6 +1325,139 @@ const Portfolio: React.FC<PortfolioProps> = ({
                </form>
             </div>
          </div>
+      )}
+
+      {/* Screenshot Import Modal */}
+      {showScreenshotModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in p-4 overflow-y-auto">
+          <div className="bg-brand-card w-full max-w-2xl p-6 rounded-2xl border border-white/10 shadow-2xl my-8">
+            <h3 className="text-xl font-bold text-white mb-2">从截图导入持仓</h3>
+            <p className="text-xs text-brand-muted mb-6">
+              导入到：{state.brokerageAccounts.find(b => b.id === screenshotBrokerageId)?.name}
+            </p>
+
+            {screenshotParsing && (
+              <div className="flex flex-col items-center justify-center py-16 gap-4">
+                <Loader2 className="w-8 h-8 text-brand-green animate-spin" />
+                <span className="text-brand-muted text-sm">AI 正在识别截图中的持仓数据...</span>
+              </div>
+            )}
+
+            {screenshotError && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-red-400 text-sm mb-4">
+                {screenshotError}
+              </div>
+            )}
+
+            {!screenshotParsing && parsedItems.length > 0 && (
+              <>
+                <p className="text-xs text-brand-muted mb-3">
+                  识别到 {parsedItems.length} 只持仓，请核对并修改股票代码后导入。勾选要导入的条目：
+                </p>
+                <div className="overflow-x-auto mb-4">
+                  <table className="w-full text-sm">
+                    <thead className="bg-white/5 text-xs text-brand-muted uppercase">
+                      <tr>
+                        <th className="p-3 text-left w-8"></th>
+                        <th className="p-3 text-left">名称</th>
+                        <th className="p-3 text-left">股票代码 *</th>
+                        <th className="p-3 text-left">市场</th>
+                        <th className="p-3 text-right">持仓</th>
+                        <th className="p-3 text-right">成本价</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {parsedItems.map((item, idx) => (
+                        <tr key={idx} className={`${!item.selected ? 'opacity-40' : ''}`}>
+                          <td className="p-3">
+                            <input
+                              type="checkbox"
+                              checked={item.selected}
+                              onChange={e => updateParsedItem(idx, 'selected', e.target.checked)}
+                              className="w-4 h-4 accent-brand-green cursor-pointer"
+                            />
+                          </td>
+                          <td className="p-3 text-brand-muted text-xs">{item.name}</td>
+                          <td className="p-3">
+                            <div className="relative w-28">
+                              <input
+                                value={item.symbol || ''}
+                                onChange={e => {
+                                  updateParsedItem(idx, 'symbol', e.target.value);
+                                  if (e.target.value.trim()) updateParsedItem(idx, 'symbolConfirmed', true);
+                                }}
+                                className="w-full bg-brand-dark border border-white/10 rounded px-2 py-1 text-white text-xs focus:border-brand-green outline-none font-mono"
+                                placeholder="如 601658"
+                              />
+                              {/* '搜' badge: code was auto-searched, not read from screenshot */}
+                              {item.symbol && !item.symbolConfirmed && (
+                                <span
+                                  className="absolute -top-1.5 -right-1.5 text-[9px] font-bold bg-brand-green/20 text-brand-green/80 rounded px-0.5 leading-tight"
+                                  title="代码由搜索自动填入，请确认是否正确"
+                                >搜</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <select
+                              value={item.market}
+                              onChange={e => updateParsedItem(idx, 'market', e.target.value)}
+                              className="bg-brand-dark border border-white/10 rounded px-2 py-1 text-white text-xs outline-none"
+                            >
+                              <option value="cn">CN</option>
+                              <option value="hk">HK</option>
+                              <option value="us">US</option>
+                            </select>
+                          </td>
+                          <td className="p-3 text-right">
+                            <input
+                              type="number"
+                              value={item.quantity ?? ''}
+                              onChange={e => updateParsedItem(idx, 'quantity', e.target.value === '' ? null : Number(e.target.value))}
+                              className="w-20 bg-brand-dark border border-white/10 rounded px-2 py-1 text-white text-xs focus:border-brand-green outline-none text-right font-mono"
+                            />
+                          </td>
+                          <td className="p-3 text-right">
+                            <input
+                              type="number"
+                              step="any"
+                              value={item.costPrice ?? ''}
+                              onChange={e => updateParsedItem(idx, 'costPrice', e.target.value === '' ? null : Number(e.target.value))}
+                              className="w-20 bg-brand-dark border border-white/10 rounded px-2 py-1 text-white text-xs focus:border-brand-green outline-none text-right font-mono"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {!screenshotParsing && parsedItems.length === 0 && !screenshotError && (
+              <div className="text-center py-8 text-brand-muted text-sm">暂无识别结果</div>
+            )}
+
+            <div className="flex gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => { setShowScreenshotModal(false); setParsedItems([]); }}
+                className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white rounded-lg font-medium transition-colors"
+              >
+                取消
+              </button>
+              {parsedItems.length > 0 && !screenshotParsing && (
+                <button
+                  type="button"
+                  onClick={handleConfirmImport}
+                  className="flex-1 py-3 bg-brand-green hover:bg-[#00b004] text-black rounded-lg font-bold transition-colors"
+                >
+                  确认导入 ({parsedItems.filter(i => i.selected).length} 只)
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Delete Confirmation Modal */}
