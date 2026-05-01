@@ -1,12 +1,11 @@
 import { AppState, Currency } from '../types';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { supabase } from '../supabase/supabaseClient';
 
 export const INITIAL_STATE: AppState = {
   baseCurrency: Currency.CNY,
   brokerageAccounts: [],
   assets: [],
-  clearedAssets: [], // Initialize empty
+  clearedAssets: [],
   liabilities: [],
   journal: [],
   history: []
@@ -14,10 +13,7 @@ export const INITIAL_STATE: AppState = {
 
 const GUEST_STORAGE_KEY = 'asset_box_guest_data';
 
-// --- Remote Storage (Firestore) ---
-
 export const loadRemoteState = async (userId: string): Promise<AppState> => {
-  // Guest Mode Handling
   if (userId === 'guest') {
     try {
       const localData = localStorage.getItem(GUEST_STORAGE_KEY);
@@ -31,25 +27,28 @@ export const loadRemoteState = async (userId: string): Promise<AppState> => {
   }
 
   try {
-    const docRef = doc(db, "users", userId);
-    const docSnap = await getDoc(docRef);
+    const { data, error } = await supabase
+      .from('states')
+      .select('app_state')
+      .eq('user_id', userId)
+      .single();
 
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      // Merge with initial state to ensure new schema fields exist
-      return { ...INITIAL_STATE, ...data.appState };
-    } else {
-      // User doesn't exist yet, return empty initial state
+    if (error && error.code !== 'PGRST116') {
+      console.error("Error loading data from Supabase:", error);
       return INITIAL_STATE;
     }
+
+    if (data) {
+      return { ...INITIAL_STATE, ...data.app_state };
+    }
+    return INITIAL_STATE;
   } catch (error) {
-    console.error("Error loading data from Firebase:", error);
+    console.error("Error loading data from Supabase:", error);
     return INITIAL_STATE;
   }
 };
 
 export const saveRemoteState = async (userId: string, state: AppState) => {
-  // Guest Mode Handling
   if (userId === 'guest') {
     try {
       localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(state));
@@ -60,18 +59,18 @@ export const saveRemoteState = async (userId: string, state: AppState) => {
   }
 
   try {
-    const docRef = doc(db, "users", userId);
-    
-    // FIX: Firebase Firestore does not support 'undefined' values.
-    // JSON.stringify removes keys with undefined values, sanitizing the object for Firestore.
+    // JSON.stringify removes undefined values which are not valid in JSON/PostgreSQL JSONB
     const sanitizedState = JSON.parse(JSON.stringify(state));
 
-    // We store it under an 'appState' field
-    await setDoc(docRef, { 
-      appState: sanitizedState,
-      lastUpdated: new Date().toISOString()
-    }, { merge: true });
+    const { error } = await supabase
+      .from('states')
+      .upsert(
+        { user_id: userId, app_state: sanitizedState, last_updated: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      );
+
+    if (error) console.error("Error saving data to Supabase:", error);
   } catch (error) {
-    console.error("Error saving data to Firebase:", error);
+    console.error("Error saving data to Supabase:", error);
   }
 };

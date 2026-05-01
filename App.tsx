@@ -12,13 +12,17 @@ import { loadRemoteState, saveRemoteState, INITIAL_STATE } from './services/stor
 import { fetchCryptoPrices, fetchExchangeRates, fetchStockPrices } from './services/apiService';
 import { DEFAULT_HKD_CNY_RATE } from './constants';
 
-// Firebase imports
-import { auth, googleProvider } from './firebaseConfig';
-import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { supabase } from './supabase/supabaseClient';
+
+interface AppUser {
+  uid: string;
+  email: string | null;
+  photoURL: string | null;
+}
 
 const App: React.FC = () => {
   // Auth State
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
 
@@ -32,52 +36,57 @@ const App: React.FC = () => {
   // Mobile sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Guard: only allow auto-save AFTER the initial Firebase data has been loaded.
+  // Guard: only allow auto-save AFTER initial data has been loaded.
   // Without this, the auto-save effect can fire with empty INITIAL_STATE the moment
-  // the user object is set (before loadRemoteState completes), wiping Firebase data.
+  // the user object is set (before loadRemoteState completes), wiping remote data.
   const [saveEnabled, setSaveEnabled] = useState(false);
 
   // Use refs to track state for closures
   const stateRef = useRef(state);
-  const userRef = useRef<User | null>(null);
+  const userRef = useRef<AppUser | null>(null);
 
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { userRef.current = user; }, [user]);
 
   // 1. Auth Listener
+  // NOTE: Do NOT await Supabase queries inside onAuthStateChange — it causes a deadlock
+  // because the auth state machine waits for the callback to return before settling.
+  // Data loading is deferred via setTimeout to run after the callback returns.
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        // Firebase fires onAuthStateChanged multiple times (token refresh, reconnect, etc.).
-        // If the same user is already loaded, skip re-loading to prevent overwriting
-        // in-memory state (and subsequently writing stale data back to Firebase).
-        if (userRef.current?.uid === currentUser.uid && saveEnabled) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        if (userRef.current?.uid === session.user.id && saveEnabled) {
           setAuthLoading(false);
           return;
         }
-        setUser(currentUser);
-        // Load data from Firebase
+        const appUser: AppUser = {
+          uid: session.user.id,
+          email: session.user.email ?? null,
+          photoURL: null,
+        };
+        setUser(appUser);
+        setAuthLoading(false);
         setDataLoading(true);
-        const remoteData = await loadRemoteState(currentUser.uid);
-        setState(remoteData);
-        setDataLoading(false);
-        setSaveEnabled(true);   // safe to auto-save from now on
-        // Trigger price refresh after data load
-        refreshData(remoteData.assets, remoteData);
+        // Defer data loading outside the auth callback to avoid deadlock
+        setTimeout(async () => {
+          const remoteData = await loadRemoteState(session.user.id);
+          setState(remoteData);
+          setDataLoading(false);
+          setSaveEnabled(true);
+          refreshData(remoteData.assets, remoteData);
+        }, 0);
       } else {
-        // Only clear state if we are NOT in guest mode
-        // If userRef.current is 'guest', we ignore the firebase 'null' event
         if (userRef.current?.uid !== 'guest') {
-            setUser(null);
-            setState(INITIAL_STATE);
+          setUser(null);
+          setState(INITIAL_STATE);
         }
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     });
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Auto-Save to Firebase — only runs after initial load completes (saveEnabled guard)
+  // 2. Auto-Save — only runs after initial load completes (saveEnabled guard)
   useEffect(() => {
     if (user && saveEnabled) {
       saveRemoteState(user.uid, state);
@@ -95,59 +104,36 @@ const App: React.FC = () => {
   }, [user]);
 
   // Auth Handlers
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      console.error("Login failed", error);
-      alert("Login failed. Please check your domain configuration in Firebase Console. You can use Guest Mode to test.");
-    }
+  const handleLogin = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) alert('登录失败：' + error.message);
+  };
+
+  const handleSignUp = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) alert('注册失败：' + error.message);
+    else alert('注册成功！');
   };
 
   const handleGuestLogin = async () => {
-      const guestUser = {
-          uid: 'guest',
-          email: 'guest@demo.com',
-          displayName: 'Guest User',
-          photoURL: null,
-          emailVerified: true,
-          isAnonymous: true,
-          metadata: {},
-          providerData: [],
-          refreshToken: '',
-          tenantId: null,
-          delete: async () => {},
-          getIdToken: async () => '',
-          getIdTokenResult: async () => ({} as any),
-          reload: async () => {},
-          toJSON: () => ({}),
-          phoneNumber: null,
-          providerId: 'guest'
-      } as unknown as User;
-
-      setUser(guestUser);
-      setAuthLoading(false);
-
-      setDataLoading(true);
-      const guestData = await loadRemoteState('guest');
-      setState(guestData);
-      setDataLoading(false);
-      setSaveEnabled(true);
-      refreshData(guestData.assets, guestData);
+    const guestUser: AppUser = { uid: 'guest', email: 'guest@demo.com', photoURL: null };
+    setUser(guestUser);
+    setAuthLoading(false);
+    setDataLoading(true);
+    const guestData = await loadRemoteState('guest');
+    setState(guestData);
+    setDataLoading(false);
+    setSaveEnabled(true);
+    refreshData(guestData.assets, guestData);
   };
 
   const handleLogout = async () => {
     if (user?.uid === 'guest') {
-        setUser(null);
-        setState(INITIAL_STATE);
-        return;
+      setUser(null);
+      setState(INITIAL_STATE);
+      return;
     }
-
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Logout failed", error);
-    }
+    await supabase.auth.signOut();
   };
 
   const refreshData = async (assetsToUpdate: Asset[], currentState: AppState) => {
@@ -470,7 +456,7 @@ const App: React.FC = () => {
   }
 
   if (!user) {
-      return <Login onLogin={handleLogin} onGuestLogin={handleGuestLogin} loading={authLoading} />;
+      return <Login onLogin={handleLogin} onSignUp={handleSignUp} onGuestLogin={handleGuestLogin} loading={authLoading} />;
   }
 
   return (

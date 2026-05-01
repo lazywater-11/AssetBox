@@ -1,0 +1,7 @@
+{
+  "name": "asset-box-scripts",
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0"
+  }
+}
